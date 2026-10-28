@@ -18,6 +18,8 @@ export interface PlayerView {
   /** Player picking a colour or a hand to swap with. */
   chooser: number | null;
   drawnThisTurn: number;
+  /** Players knocked out of this game (passed after the draw pile ran out). */
+  out: boolean[];
   /** Draw penalty stacked on the current player, if any. */
   stack: DrawStack | null;
   turn: number;
@@ -44,6 +46,7 @@ export function redact(m: MatchState, seat: number): PlayerView {
     matchPhase: m.phase,
     chooser: g.chooser,
     drawnThisTurn: g.drawnThisTurn,
+    out: g.out,
     stack: stackOf(g),
     turn: g.turn,
     scores: m.scores,

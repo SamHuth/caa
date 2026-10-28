@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DECK_SIZE } from './cards';
-import { cpuColour, cpuJumpIn, cpuMove, cpuSwapTarget } from './cpu';
-import { MAX_DRAW, nextPlayer, pileOf, stackOf } from './game';
+import { cpuColour, cpuJumpIn, cpuMove } from './cpu';
+import { activePlayers, nextPlayer, pileOf, smallestOtherHand, stackOf } from './game';
 import { type Difficulty, DEFAULT_SETTINGS, type MatchState, newMatch, reduceMatch } from './match';
 import { rand } from './rng';
 
@@ -39,7 +39,7 @@ function simulate(seed: number, players: number, difficulty: Difficulty) {
     if (g.phase === 'play' && rnd() < 0.3) {
       const jumper = Math.floor(rnd() * players);
       const jump = cpuJumpIn(g.hands[jumper], pileOf(g), stackOf(g), difficulty, rnd);
-      if (jump && jumper !== g.current) {
+      if (jump && jumper !== g.current && !g.out[jumper]) {
         const res = reduceMatch(m, { type: 'play', player: jumper, cardIds: [jump.cardId] });
         expect(res.ok).toBe(true);
         if (res.ok) step(res.state);
@@ -49,7 +49,7 @@ function simulate(seed: number, players: number, difficulty: Difficulty) {
 
     const p = g.chooser ?? g.current;
     if (g.phase === 'chooseSwap') {
-      const res = reduceMatch(m, { type: 'swap', player: p, target: cpuSwapTarget(g.hands, p) });
+      const res = reduceMatch(m, { type: 'swap', player: p, target: smallestOtherHand(g, p) });
       expect(res.ok).toBe(true);
       if (res.ok) step(res.state);
       continue;
@@ -65,12 +65,11 @@ function simulate(seed: number, players: number, difficulty: Difficulty) {
       pile: pileOf(g),
       stack: stackOf(g),
       difficulty,
-      canDraw: g.drawnThisTurn < MAX_DRAW,
       nextHandCount: g.hands[nextPlayer(g)].length,
-      minOtherHandCount: Math.min(...g.hands.filter((_, i) => i !== p).map((h) => h.length)),
+      minOtherHandCount: Math.min(...activePlayers(g).filter((i) => i !== p).map((i) => g.hands[i].length)),
       rand: rnd,
     });
-    const action = move === null ? { type: 'timeout' as const, player: p } : { ...move, player: p };
+    const action = { ...move, player: p };
     const res = reduceMatch(m, action);
     if (!res.ok) throw new Error(`seed ${seed}: ${res.reason} ${JSON.stringify(action)}`);
     step(res.state);

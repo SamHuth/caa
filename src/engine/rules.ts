@@ -58,20 +58,15 @@ export function validateJumpIn(cards: Card[], pile: Pile, handSize: number): Pla
   return { ok: true, kind: 'single' };
 }
 
-export type DrawKind = 'draw2' | 'draw4';
-
-/** Penalty waiting for the current player: they add a matching draw card or take it all. */
+/** Penalty waiting for the current player: they add any Draw 2 / Draw 4 or take it all. */
 export interface DrawStack {
-  kind: DrawKind;
   count: number;
 }
 
-/** Cards that start or add to a draw stack. (The Smiley 8's +2 is immediate and never stacks.) */
-export function stackKind(card: Card): DrawKind | null {
-  return card.kind === 'draw2' || card.kind === 'draw4' ? card.kind : null;
+/** How much a card adds to a draw stack: Draw 2 → 2, Draw 4 → 4. (The Smiley 8's +2 is immediate and never stacks.) */
+export function drawValue(card: Card): number {
+  return card.kind === 'draw2' ? 2 : card.kind === 'draw4' ? 4 : 0;
 }
-
-export const drawAmount = (kind: DrawKind) => (kind === 'draw2' ? 2 : 4);
 
 export interface PlayContext {
   pile: Pile;
@@ -86,10 +81,9 @@ export function checkPlay(cards: Card[], ctx: PlayContext): PlayCheck {
   const { pile, handSize, isTurn, stack } = ctx;
   if (!stack) return isTurn ? validatePlay(cards, pile, handSize) : validateJumpIn(cards, pile, handSize);
 
-  // Facing a stack: only a matching draw card can be added.
-  const need = stack.kind === 'draw2' ? 'a Draw 2' : 'a Draw 4';
-  if (cards.length !== 1 || stackKind(cards[0]) !== stack.kind) {
-    return fail(isTurn ? `Stack ${need} or take +${stack.count}` : `Only ${need} can jump in on a stack`);
+  // Facing a stack: Draw 2s and Draw 4s stack on each other, any colour.
+  if (cards.length !== 1 || !drawValue(cards[0])) {
+    return fail(isTurn ? `Stack a Draw 2 or Draw 4, or take +${stack.count}` : 'Only a Draw 2 or Draw 4 can jump in on a stack');
   }
   if (!isTurn && !sameFace(cards[0], pile.top)) return fail('Jump-ins must be the exact same card');
   if (handSize === 1 && isAction(cards[0])) return fail("You can't go out on an action or wild card");

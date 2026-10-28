@@ -22,7 +22,7 @@ export type ClientAction =
   | { type: 'play'; cardIds: number[] }
   | { type: 'draw' }
   | { type: 'chooseColour'; colour: Colour }
-  | { type: 'swap'; target: number | null };
+  | { type: 'swap'; target: number };
 
 export interface Avatar {
   emoji: string;
@@ -44,6 +44,8 @@ export interface ClientView extends PlayerView {
   turnMsLeft: number | null;
   /** Countdown to the next game after a game/round ends. */
   nextGameMs: number | null;
+  /** How long the current game has been running (stops when it ends). */
+  gameElapsedMs: number;
 }
 
 export interface LobbyPlayer {

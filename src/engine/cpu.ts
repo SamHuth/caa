@@ -10,8 +10,6 @@ export interface CpuContext {
   pile: Pile;
   stack: DrawStack | null;
   difficulty: Difficulty;
-  /** Whether another card may be drawn this turn. */
-  canDraw: boolean;
   /** Hand size of the player who plays after this CPU. */
   nextHandCount: number;
   /** Smallest hand among the other players (makes a 7 swap tempting). */
@@ -72,14 +70,14 @@ function orderSum(first: Card, rest: Card[], hand: Card[]): Card[] {
 
 const points = (cards: Card[]) => cards.reduce((s, c) => s + cardPoints(c), 0);
 
-export function cpuMove(ctx: CpuContext): CpuMove | null {
+export function cpuMove(ctx: CpuContext): CpuMove {
   const { hand, pile, difficulty, rand } = ctx;
   const plays = enumeratePlays(hand, pile, ctx.stack, {
     doubles: difficulty !== 'easy',
     sums: difficulty === 'hard',
   });
-  // Facing a stack with nothing to add: take it.
-  if (plays.length === 0) return ctx.stack || ctx.canDraw ? { type: 'draw' } : null;
+  // Nothing to play: draw a card, take the stack, or (pile empty) pass.
+  if (plays.length === 0) return { type: 'draw' };
 
   let best: Card[];
   if (difficulty === 'easy') {
@@ -106,14 +104,6 @@ export function cpuColour(hand: Card[]): Colour {
   return favouriteColour(hand);
 }
 
-/** After a single 7: swap with the smallest other hand, if it beats keeping ours. */
-export function cpuSwapTarget(hands: Card[][], me: number): number | null {
-  let best: number | null = null;
-  hands.forEach((h, i) => {
-    if (i !== me && h.length < hands[me].length && (best === null || h.length < hands[best].length)) best = i;
-  });
-  return best;
-}
 
 const JUMP_IN: Record<Difficulty, { chance: number; min: number; max: number }> = {
   easy: { chance: 0.35, min: 4000, max: 6500 },

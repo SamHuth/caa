@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DECK_SIZE } from './cards';
-import { type GameAction, type GameState, MAX_DRAW, newGame, reduceGame, stackOf, topCard } from './game';
+import { type GameAction, type GameState, newGame, reduceGame, stackOf, topCard } from './game';
 import { draw2, draw4, makeGame, num, reverse, skip, smiley, wild } from './testUtils';
 
 function apply(s: GameState, a: GameAction) {
@@ -50,7 +50,7 @@ describe('turn flow', () => {
     const s = makeGame({ hands: [[d2, num('blue', 1)], [num('red', 1)], [num('red', 2)]], top: num('red', 3) });
     let { state } = apply(s, { type: 'play', player: 0, cardIds: [d2.id] });
     expect(state.current).toBe(1);
-    expect(stackOf(state)).toEqual({ kind: 'draw2', count: 2 });
+    expect(stackOf(state)).toEqual({ count: 2 });
     expect(reduceGame(state, { type: 'play', player: 1, cardIds: [state.hands[1][0].id] }).ok).toBe(false);
     ({ state } = apply(state, { type: 'draw', player: 1 }));
     expect(state.hands[1]).toHaveLength(3);
@@ -91,62 +91,30 @@ describe('turn flow', () => {
 });
 
 describe('drawing', () => {
-  it('draws one card per draw and the player can keep drawing', () => {
+  it('draws one card per draw, with no limit, until the player can play', () => {
     const playable = num('red', 9);
-    const s = makeGame({
-      hands: [[num('blue', 1)], [num('red', 1)]],
-      top: num('red', 3),
-      drawPile: [num('yellow', 4), playable, num('blue', 2)], // pops from the end
-    });
-    let { state, events } = apply(s, { type: 'draw', player: 0 });
-    expect(state.hands[0]).toHaveLength(2);
+    const dead = Array.from({ length: 12 }, () => num('blue', 5));
+    const s = makeGame({ hands: [[num('blue', 1)], [num('red', 1)]], top: num('red', 3), drawPile: [playable, ...dead] });
+    let state = s;
+    for (let i = 0; i < 12; i++) state = apply(state, { type: 'draw', player: 0 }).state;
+    expect(state.hands[0]).toHaveLength(13);
     expect(state.current).toBe(0);
-    expect(events).toContainEqual(expect.objectContaining({ type: 'draw', count: 1 }));
     ({ state } = apply(state, { type: 'draw', player: 0 }));
-    expect(state.drawnThisTurn).toBe(2);
-    // Holding a playable card doesn't stop more draws.
-    ({ state } = apply(state, { type: 'draw', player: 0 }));
-    expect(state.hands[0]).toHaveLength(4);
+    expect(state.hands[0].at(-1)).toEqual(playable);
+    // Holding a playable card: no more drawing.
+    expect(reduceGame(state, { type: 'draw', player: 0 }).ok).toBe(false);
     ({ state } = apply(state, { type: 'play', player: 0, cardIds: [playable.id] }));
     expect(state.current).toBe(1);
-    expect(state.drawnThisTurn).toBe(0);
   });
 
-  it(`passes after ${MAX_DRAW} draws if nothing is playable`, () => {
-    let state = makeGame({
-      hands: [[num('blue', 1)], [num('red', 1)]],
-      top: num('red', 3),
-      drawPile: Array.from({ length: 15 }, () => num('blue', 5)),
-    });
-    for (let i = 0; i < MAX_DRAW; i++) state = apply(state, { type: 'draw', player: 0 }).state;
-    expect(state.hands[0]).toHaveLength(1 + MAX_DRAW);
-    expect(state.current).toBe(1);
+  it('cannot draw while holding a playable card', () => {
+    const s = makeGame({ hands: [[num('red', 1)], [num('red', 1)]], top: num('red', 3) });
+    expect(reduceGame(s, { type: 'draw', player: 0 }).ok).toBe(false);
   });
 
-  it(`after ${MAX_DRAW} draws with a playable card, the player must play`, () => {
-    let state = makeGame({
-      hands: [[num('red', 1), num('blue', 2)], [num('red', 1)]],
-      top: num('red', 3),
-      drawPile: Array.from({ length: 15 }, () => num('blue', 5)),
-    });
-    for (let i = 0; i < MAX_DRAW; i++) state = apply(state, { type: 'draw', player: 0 }).state;
-    expect(state.current).toBe(0);
-    expect(reduceGame(state, { type: 'draw', player: 0 }).ok).toBe(false);
-  });
-
-  it('reshuffles the discard pile when the draw pile runs out', () => {
-    const s = makeGame({ hands: [[num('blue', 1)], [num('red', 1)]], top: num('red', 3), drawPile: [] });
-    s.discard = [num('red', 4), num('red', 5), num('red', 3)];
-    const { state, events } = apply(s, { type: 'draw', player: 0 });
-    expect(events).toContainEqual({ type: 'reshuffle' });
-    expect(state.discard).toHaveLength(1);
-    expect(state.hands[0]).toHaveLength(2);
-  });
-
-  it('passes the turn if no cards are left to draw', () => {
-    const s = makeGame({ hands: [[num('blue', 1)], [num('red', 1)]], top: num('red', 3), drawPile: [] });
-    const { state } = apply(s, { type: 'draw', player: 0 });
-    expect(state.current).toBe(1);
+  it('may draw when the only matching card is an action it cannot go out on', () => {
+    const s = makeGame({ hands: [[skip('red')], [num('red', 1)]], top: num('red', 3) });
+    expect(apply(s, { type: 'draw', player: 0 }).state.hands[0]).toHaveLength(2);
   });
 
   it('timeout draws 2 and passes', () => {
@@ -186,7 +154,7 @@ describe('jump-in', () => {
     const s = makeGame({ hands: [[num('blue', 1)], [jump, num('green', 1)], [num('yellow', 2)]], top, current: 0 });
     const { state } = apply(s, { type: 'play', player: 1, cardIds: [jump.id] });
     expect(state.current).toBe(2);
-    expect(stackOf(state)).toEqual({ kind: 'draw2', count: 2 });
+    expect(stackOf(state)).toEqual({ count: 2 });
   });
 
   it('can win the game with a number jump-in', () => {
@@ -218,19 +186,26 @@ describe('stacking', () => {
     const { s, a, b } = setup();
     let { state } = apply(s, { type: 'play', player: 0, cardIds: [a.id] });
     ({ state } = apply(state, { type: 'play', player: 1, cardIds: [b.id] }));
-    expect(stackOf(state)).toEqual({ kind: 'draw2', count: 4 });
+    expect(stackOf(state)).toEqual({ count: 4 });
     expect(state.current).toBe(2);
     ({ state } = apply(state, { type: 'draw', player: 2 }));
     expect(state.hands[2]).toHaveLength(6);
     expect(state.current).toBe(0);
   });
 
-  it('draw 4 does not stack on draw 2', () => {
+  it('draw 2s and draw 4s stack on each other', () => {
     const { s, a } = setup();
     const d4 = draw4();
+    const d2 = draw2('yellow');
     s.hands[1].push(d4);
-    const { state } = apply(s, { type: 'play', player: 0, cardIds: [a.id] });
-    expect(reduceGame(state, { type: 'play', player: 1, cardIds: [d4.id] }).ok).toBe(false);
+    s.hands[2].push(d2);
+    let { state } = apply(s, { type: 'play', player: 0, cardIds: [a.id] });
+    ({ state } = apply(state, { type: 'play', player: 1, cardIds: [d4.id] }));
+    ({ state } = apply(state, { type: 'chooseColour', player: 1, colour: 'blue' }));
+    expect(stackOf(state)).toEqual({ count: 6 });
+    ({ state } = apply(state, { type: 'play', player: 2, cardIds: [d2.id] }));
+    expect(stackOf(state)).toEqual({ count: 8 });
+    expect(state.current).toBe(0);
   });
 
   it('draw 4s stack with each player choosing a colour', () => {
@@ -241,7 +216,7 @@ describe('stacking', () => {
     ({ state } = apply(state, { type: 'chooseColour', player: 0, colour: 'green' }));
     ({ state } = apply(state, { type: 'play', player: 1, cardIds: [y.id] }));
     ({ state } = apply(state, { type: 'chooseColour', player: 1, colour: 'blue' }));
-    expect(stackOf(state)).toEqual({ kind: 'draw4', count: 8 });
+    expect(stackOf(state)).toEqual({ count: 8 });
     expect(state.current).toBe(2);
   });
 
@@ -250,9 +225,8 @@ describe('stacking', () => {
     const jump = draw2('red');
     const s = makeGame({ hands: [[num('blue', 1)], [num('blue', 2)], [jump, num('green', 1)], [num('yellow', 2)]], top, current: 1 });
     s.pendingDraw = 2;
-    s.pendingKind = 'draw2';
     const { state } = apply(s, { type: 'play', player: 2, cardIds: [jump.id] });
-    expect(stackOf(state)).toEqual({ kind: 'draw2', count: 4 });
+    expect(stackOf(state)).toEqual({ count: 4 });
     expect(state.current).toBe(3);
   });
 
@@ -345,11 +319,12 @@ describe('7 swap', () => {
     expect(state.current).toBe(1);
   });
 
-  it('can be declined, and times out to no swap', () => {
+  it('is compulsory: timing out swaps with the smallest hand', () => {
     const { s, seven } = setup();
     const { state } = apply(s, { type: 'play', player: 0, cardIds: [seven.id] });
-    expect(apply(state, { type: 'swap', player: 0, target: null }).state.hands[0]).toHaveLength(3);
-    expect(apply(state, { type: 'timeout', player: 0 }).state.hands[0]).toHaveLength(3);
+    const after = apply(state, { type: 'timeout', player: 0 }).state;
+    expect(after.hands[0]).toHaveLength(1);
+    expect(after.hands[1]).toHaveLength(3);
   });
 
   it('cannot swap with yourself', () => {
@@ -403,6 +378,64 @@ describe('12 rotate', () => {
     const { state } = apply(s, { type: 'play', player: 0, cardIds: [a.id, b.id] });
     expect(state.hands[0]).toHaveLength(1);
     expect(state.hands[0][0].colour).toBe('yellow');
+  });
+});
+
+describe('empty draw pile', () => {
+  // Pile is empty; nobody can play on a red 9 except where noted.
+  const game = (hands: ReturnType<typeof num>[][], current = 0) =>
+    makeGame({ hands, top: num('red', 9), drawPile: [], current });
+
+  it('never reshuffles: a player who cannot play passes and is out', () => {
+    const s = game([[num('blue', 1)], [num('green', 2)], [num('yellow', 3)]]);
+    s.discard = [num('red', 4), num('red', 5), num('red', 9)];
+    const { state, events } = apply(s, { type: 'draw', player: 0 });
+    expect(events).toContainEqual({ type: 'out', player: 0 });
+    expect(state.out[0]).toBe(true);
+    expect(state.discard).toHaveLength(3);
+    expect(state.current).toBe(1);
+  });
+
+  it('turns skip players who are out, and they cannot jump in', () => {
+    const jump = num('red', 9);
+    const s = game([[jump, num('blue', 1)], [num('green', 2)], [num('yellow', 3)], [num('green', 4)]], 1);
+    s.out[2] = true;
+    const { state } = apply(s, { type: 'draw', player: 1 });
+    expect(state.current).toBe(3);
+    const blocked = structuredClone(state);
+    blocked.out[0] = true;
+    expect(reduceGame(blocked, { type: 'play', player: 0, cardIds: [jump.id] }).ok).toBe(false);
+  });
+
+  it('when one player is left, the last person to play a card wins', () => {
+    const play = num('red', 4);
+    const s = game([[num('blue', 1)], [play, num('blue', 2)], [num('yellow', 3)]], 1);
+    s.discard = [num('red', 9)];
+    let { state } = apply(s, { type: 'play', player: 1, cardIds: [play.id] }); // top red 4
+    ({ state } = apply(state, { type: 'draw', player: 2 }));
+    expect(state.out[2]).toBe(true);
+    const r = apply(state, { type: 'draw', player: 0 });
+    expect(r.state.phase).toBe('over');
+    expect(r.state.winner).toBe(1);
+  });
+
+  it('timing out or facing a stack with nothing to draw also knocks you out', () => {
+    let s = game([[num('blue', 1)], [num('green', 2)], [num('yellow', 3)]]);
+    expect(apply(s, { type: 'timeout', player: 0 }).state.out[0]).toBe(true);
+    s = game([[num('blue', 1)], [num('green', 2)], [num('yellow', 3)]]);
+    s.pendingDraw = 4;
+    const { state } = apply(s, { type: 'draw', player: 0 });
+    expect(state.out[0]).toBe(true);
+    expect(state.pendingDraw).toBe(0);
+  });
+
+  it('a 7 cannot swap with a player who is out', () => {
+    const seven = num('red', 7);
+    const s = makeGame({ hands: [[seven, num('blue', 1)], [num('green', 2)], [num('yellow', 3)]], top: num('red', 3), drawPile: [] });
+    s.out[1] = true;
+    const { state } = apply(s, { type: 'play', player: 0, cardIds: [seven.id] });
+    expect(reduceGame(state, { type: 'swap', player: 0, target: 1 }).ok).toBe(false);
+    expect(apply(state, { type: 'swap', player: 0, target: 2 }).state.hands[0]).toHaveLength(1);
   });
 });
 

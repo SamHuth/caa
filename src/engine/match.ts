@@ -42,7 +42,10 @@ export function roundsToWin(bestOf: number): number {
 
 export interface GameResult {
   winner: number;
+  /** Sum of the other players' hands. */
   points: number;
+  /** Won by being the last to play once everyone else was out, rather than by emptying their hand. */
+  lastStanding: boolean;
   /** Set when this game also won the round. */
   roundWinner: number | null;
   matchWinner: number | null;
@@ -51,7 +54,7 @@ export interface GameResult {
 }
 
 /**
- * game  = one hand, until someone has 0 cards
+ * game  = one hand, until someone has 0 cards (or is the last player still in)
  * round = games until someone's score reaches roundScoreLimit
  * match = best of N rounds
  */
@@ -120,9 +123,10 @@ export function reduceMatch(prev: MatchState, action: MatchAction): Reduced<Matc
   if (r.state.phase === 'over') {
     const winner = r.state.winner!;
     const leftover = r.state.hands.map(handPoints);
-    const points = leftover.reduce((a, b) => a + b, 0);
+    const points = leftover.reduce((sum, p, i) => (i === winner ? sum : sum + p), 0);
     s.scores[winner] += points;
-    const result: GameResult = { winner, points, roundWinner: null, matchWinner: null, leftover };
+    const lastStanding = r.state.hands[winner].length > 0;
+    const result: GameResult = { winner, points, lastStanding, roundWinner: null, matchWinner: null, leftover };
     s.phase = 'gameOver';
     if (s.scores[winner] >= s.settings.roundScoreLimit) {
       s.roundWins[winner]++;

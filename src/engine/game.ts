@@ -1,10 +1,11 @@
 import { type Card, type Colour, COLOURS, buildDeck } from './cards';
-import { type DrawKind, type DrawStack, type Pile, canPlaySingle, checkPlay, drawAmount, stackKind } from './rules';
+import { type DrawStack, type Pile, checkPlay, drawValue } from './rules';
 import { type Seeded, randInt, shuffle } from './rng';
 
-/** One hand of play, ending when someone empties their hand. */
+/** One hand of play. Ends when someone empties their hand, or when all but one player are out. */
 export interface GameState extends Seeded {
   hands: Card[][];
+  /** Never refilled: once it's empty, players who can't play are out. */
   drawPile: Card[];
   /** Last element is the top of the pile. */
   discard: Card[];
@@ -16,11 +17,14 @@ export interface GameState extends Seeded {
   phase: 'play' | 'chooseColour' | 'chooseSwap' | 'over';
   /** Player making the colour or swap choice. */
   chooser: number | null;
-  /** Stacked draw penalty facing the current player (0 = none). */
+  /** Stacked Draw 2 / Draw 4 penalty facing the current player (0 = none). */
   pendingDraw: number;
-  pendingKind: DrawKind | null;
-  /** Cards the current player has drawn this turn, one per draw (max MAX_DRAW). */
+  /** Cards the current player has drawn this turn. */
   drawnThisTurn: number;
+  /** Players who passed after the draw pile ran out; they sit out the rest of the game. */
+  out: boolean[];
+  /** Last player to put a card down; wins if everyone else is knocked out. */
+  lastPlayer: number | null;
   winner: number | null;
   /** Increments whenever the turn changes hands; used to invalidate timers. */
   turn: number;
@@ -28,23 +32,23 @@ export interface GameState extends Seeded {
 
 export type GameAction =
   | { type: 'play'; player: number; cardIds: number[] }
-  /** Draw one card — or, when facing a stack, take the whole stack. */
+  /** Draw one card (only when you can't play) — or take a stack, or pass once the pile is empty. */
   | { type: 'draw'; player: number }
   | { type: 'chooseColour'; player: number; colour: Colour }
-  /** After a single 7: swap hands with `target`, or null to keep your own. */
-  | { type: 'swap'; player: number; target: number | null }
+  /** After a single 7: you must swap hands with another player. */
+  | { type: 'swap'; player: number; target: number }
   | { type: 'timeout'; player: number };
 
 export type GameEvent =
   | { type: 'play'; player: number; cards: Card[]; jumpIn: boolean }
   | { type: 'draw'; player: number; count: number; cards?: Card[]; reason: 'draw' | 'penalty' | 'smiley' | 'timeout' }
-  | { type: 'stack'; player: number; total: number }
+  | { type: 'stack'; player: number; total: number; added: number }
   | { type: 'skip'; player: number }
   | { type: 'reverse'; player: number; direction: 1 | -1 }
-  | { type: 'swap'; player: number; target: number | null }
+  | { type: 'swap'; player: number; target: number }
   | { type: 'rotate'; player: number; direction: 1 | -1 }
   | { type: 'colour'; player: number; colour: Colour }
-  | { type: 'reshuffle' }
+  | { type: 'out'; player: number }
   | { type: 'turn'; player: number }
   | { type: 'win'; player: number };
 
@@ -52,8 +56,6 @@ export type Reduced<S, E> = { ok: true; state: S; events: E[] } | { ok: false; r
 
 export const TIMEOUT_PENALTY = 2;
 export const SMILEY_PENALTY = 2;
-/** Most cards a player can draw in one turn; after the last, the turn passes if nothing is playable. */
-export const MAX_DRAW = 10;
 
 export function topCard(s: GameState): Card {
   return s.discard[s.discard.length - 1];
@@ -64,13 +66,29 @@ export function pileOf(s: GameState): Pile {
 }
 
 export function stackOf(s: GameState): DrawStack | null {
-  return s.pendingDraw > 0 ? { kind: s.pendingKind!, count: s.pendingDraw } : null;
+  return s.pendingDraw > 0 ? { count: s.pendingDraw } : null;
 }
 
-/** The seat `steps` turns after `from`, following the current direction. */
+export function activePlayers(s: GameState): number[] {
+  return s.hands.map((_, i) => i).filter((i) => !s.out[i]);
+}
+
+/** The seat `steps` turns after `from` in the current direction, skipping players who are out. */
 export function nextPlayer(s: GameState, from = s.current, steps = 1): number {
   const n = s.hands.length;
-  return (((from + steps * s.direction) % n) + n) % n;
+  let p = from;
+  for (let k = 0; k < steps; k++) {
+    do p = (((p + s.direction) % n) + n) % n;
+    while (s.out[p] && p !== from);
+  }
+  return p;
+}
+
+/** Whether a player has any legal play right now (every legal double or sum starts with a legal single). */
+export function canPlayAny(s: GameState, player = s.current): boolean {
+  const hand = s.hands[player];
+  const ctx = { pile: pileOf(s), handSize: hand.length, isTurn: player === s.current, stack: stackOf(s) };
+  return hand.some((c) => checkPlay([c], ctx).ok);
 }
 
 export function newGame(players: number, handSize: number, seed: number): { state: GameState; events: GameEvent[] } {
@@ -85,8 +103,9 @@ export function newGame(players: number, handSize: number, seed: number): { stat
     phase: 'play',
     chooser: null,
     pendingDraw: 0,
-    pendingKind: null,
     drawnThisTurn: 0,
+    out: Array(players).fill(false),
+    lastPlayer: null,
     winner: null,
     turn: 0,
   };
@@ -103,26 +122,12 @@ export function newGame(players: number, handSize: number, seed: number): { stat
   return { state: s, events: [{ type: 'turn', player: s.current }] };
 }
 
-function drawCards(s: GameState, player: number, n: number, events: GameEvent[]): Card[] {
+/** Draw up to n cards; the pile is never reshuffled, so this can come up short. */
+function drawCards(s: GameState, player: number, n: number): Card[] {
   const drawn: Card[] = [];
-  for (let i = 0; i < n; i++) {
-    const card = drawOne(s, events);
-    if (!card) break;
-    s.hands[player].push(card);
-    drawn.push(card);
-  }
+  while (drawn.length < n && s.drawPile.length > 0) drawn.push(s.drawPile.pop()!);
+  s.hands[player].push(...drawn);
   return drawn;
-}
-
-/** When the draw pile runs out, everything under the top card is shuffled into a new one. */
-function drawOne(s: GameState, events: GameEvent[]): Card | undefined {
-  if (s.drawPile.length === 0 && s.discard.length > 1) {
-    const top = s.discard.pop()!;
-    s.drawPile = shuffle(s, s.discard);
-    s.discard = [top];
-    events.push({ type: 'reshuffle' });
-  }
-  return s.drawPile.pop();
 }
 
 function advance(s: GameState, steps: number, events: GameEvent[]) {
@@ -132,21 +137,44 @@ function advance(s: GameState, steps: number, events: GameEvent[]) {
   events.push({ type: 'turn', player: s.current });
 }
 
-/** The current player draws the whole stack and loses their turn. */
-function takeStack(s: GameState, events: GameEvent[]) {
+function endGame(s: GameState, winner: number, events: GameEvent[]) {
+  s.phase = 'over';
+  s.winner = winner;
+  events.push({ type: 'win', player: winner });
+}
+
+/**
+ * The current player passed with nothing left to draw: they're out. When only one player
+ * is left, the last person to have played a card wins.
+ */
+function knockOut(s: GameState, events: GameEvent[]) {
   const p = s.current;
-  const cards = drawCards(s, p, s.pendingDraw, events);
-  events.push({ type: 'draw', player: p, count: cards.length, cards, reason: 'penalty' });
-  events.push({ type: 'skip', player: p });
+  s.out[p] = true;
   s.pendingDraw = 0;
-  s.pendingKind = null;
+  events.push({ type: 'out', player: p });
+  const active = activePlayers(s);
+  if (active.length <= 1) {
+    endGame(s, s.lastPlayer !== null && !s.out[s.lastPlayer] ? s.lastPlayer : active[0], events);
+    return;
+  }
   advance(s, 1, events);
 }
 
-/** Everyone passes their hand to the next player in turn order. */
+/** The current player draws the whole stack and loses their turn (or is out if there's nothing to draw). */
+function takeStack(s: GameState, events: GameEvent[]) {
+  if (s.drawPile.length === 0) return knockOut(s, events);
+  const p = s.current;
+  const cards = drawCards(s, p, s.pendingDraw);
+  events.push({ type: 'draw', player: p, count: cards.length, cards, reason: 'penalty' });
+  events.push({ type: 'skip', player: p });
+  s.pendingDraw = 0;
+  advance(s, 1, events);
+}
+
+/** Everyone still in passes their hand to the next player in turn order. */
 function rotateHands(s: GameState) {
-  const old = s.hands;
-  s.hands = old.map((_, i) => old[nextPlayer(s, i, -1)]);
+  const old = [...s.hands];
+  for (const i of activePlayers(s)) s.hands[nextPlayer(s, i)] = old[i];
 }
 
 /** Most common colour in a hand (ties broken by COLOURS order); used for auto-picks. */
@@ -156,8 +184,15 @@ export function favouriteColour(hand: Card[]): Colour {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
+/** Default swap target (timeouts and CPUs): the smallest hand still in the game. */
+export function smallestOtherHand(s: GameState, me: number): number {
+  const others = activePlayers(s).filter((i) => i !== me);
+  return others.reduce((best, i) => (s.hands[i].length < s.hands[best].length ? i : best));
+}
+
 export function reduceGame(prev: GameState, action: GameAction): Reduced<GameState, GameEvent> {
   if (prev.phase === 'over') return { ok: false, reason: 'The game is over' };
+  if (prev.out[action.player]) return { ok: false, reason: "You're out of this game" };
   const s = structuredClone(prev);
   const events: GameEvent[] = [];
   const p = action.player;
@@ -180,6 +215,7 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
       const ids = new Set(action.cardIds);
       s.hands[p] = hand.filter((c) => !ids.has(c.id));
       s.discard.push(...cards);
+      s.lastPlayer = p;
       events.push({ type: 'play', player: p, cards, jumpIn: !isTurn });
       if (!isTurn) {
         // Play continues as if the jumper just had their normal turn.
@@ -192,25 +228,22 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
       if (last.colour) s.colour = last.colour;
 
       if (s.hands[p].length === 0) {
-        s.phase = 'over';
-        s.winner = p;
-        events.push({ type: 'win', player: p });
+        endGame(s, p, events);
         break;
       }
 
-      // Draw 2s / Draw 4s add to the stack for the next player to answer or take.
-      const kind = stackKind(last);
-      if (kind) {
-        s.pendingDraw += drawAmount(kind);
-        s.pendingKind = kind;
-        events.push({ type: 'stack', player: p, total: s.pendingDraw });
+      // Draw 2s and Draw 4s stack on each other for the next player to answer or take.
+      const added = drawValue(last);
+      if (added) {
+        s.pendingDraw += added;
+        events.push({ type: 'stack', player: p, total: s.pendingDraw, added });
       }
 
       // Number-card powers only trigger when the card is played on its own.
       const single = cards.length === 1;
       if (single && last.smiley) {
         const victim = nextPlayer(s);
-        const drawn = drawCards(s, victim, SMILEY_PENALTY, events);
+        const drawn = drawCards(s, victim, SMILEY_PENALTY);
         events.push({ type: 'draw', player: victim, count: drawn.length, cards: drawn, reason: 'smiley' });
       }
 
@@ -222,8 +255,8 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         case 'reverse':
           s.direction = s.direction === 1 ? -1 : 1;
           events.push({ type: 'reverse', player: p, direction: s.direction });
-          // With two players a reverse works like a skip.
-          advance(s, s.hands.length === 2 ? 2 : 1, events);
+          // With two players left a reverse works like a skip.
+          advance(s, activePlayers(s).length === 2 ? 2 : 1, events);
           break;
         case 'wild':
         case 'draw4':
@@ -258,8 +291,8 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
     case 'swap': {
       if (s.phase !== 'chooseSwap' || s.chooser !== p) return { ok: false, reason: 'Not choosing a swap' };
       const t = action.target;
-      if (t !== null && (t === p || !Number.isInteger(t) || t < 0 || t >= s.hands.length)) {
-        return { ok: false, reason: 'Pick another player' };
+      if (t === p || !Number.isInteger(t) || t < 0 || t >= s.hands.length || s.out[t]) {
+        return { ok: false, reason: 'Pick another player to swap with' };
       }
       swapWith(s, t, events);
       break;
@@ -272,19 +305,15 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         takeStack(s, events);
         break;
       }
-      if (s.drawnThisTurn >= MAX_DRAW) return { ok: false, reason: `You've drawn ${MAX_DRAW} — play a card` };
-      // One card per draw; the player decides whether to keep drawing.
-      const card = drawOne(s, events);
-      if (!card) {
-        // Nothing left anywhere to draw.
-        events.push({ type: 'draw', player: p, count: 0, cards: [], reason: 'draw' });
-        advance(s, 1, events);
+      // Draw one card at a time until you can play; no limit, but no drawing past a playable card.
+      if (canPlayAny(s)) return { ok: false, reason: 'You can play a card — no need to draw' };
+      if (s.drawPile.length === 0) {
+        knockOut(s, events);
         break;
       }
-      s.hands[p].push(card);
+      const cards = drawCards(s, p, 1);
       s.drawnThisTurn++;
-      events.push({ type: 'draw', player: p, count: 1, cards: [card], reason: 'draw' });
-      if (s.drawnThisTurn >= MAX_DRAW && !s.hands[p].some((c) => canPlaySingle(c, pileOf(s)))) advance(s, 1, events);
+      events.push({ type: 'draw', player: p, count: 1, cards, reason: 'draw' });
       break;
     }
 
@@ -294,7 +323,7 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         break;
       }
       if (s.phase === 'chooseSwap' && s.chooser === p) {
-        swapWith(s, null, events);
+        swapWith(s, smallestOtherHand(s, p), events);
         break;
       }
       if (!isTurn || s.phase !== 'play') return { ok: false, reason: 'Not your turn' };
@@ -302,7 +331,12 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         takeStack(s, events);
         break;
       }
-      const cards = drawCards(s, p, TIMEOUT_PENALTY, events);
+      // With the pile empty, running out of time is a pass.
+      if (s.drawPile.length === 0) {
+        knockOut(s, events);
+        break;
+      }
+      const cards = drawCards(s, p, TIMEOUT_PENALTY);
       events.push({ type: 'draw', player: p, count: cards.length, cards, reason: 'timeout' });
       advance(s, 1, events);
       break;
@@ -320,9 +354,9 @@ function chooseColour(s: GameState, colour: Colour, events: GameEvent[]) {
   advance(s, 1, events);
 }
 
-function swapWith(s: GameState, target: number | null, events: GameEvent[]) {
+function swapWith(s: GameState, target: number, events: GameEvent[]) {
   const p = s.current;
-  if (target !== null) [s.hands[p], s.hands[target]] = [s.hands[target], s.hands[p]];
+  [s.hands[p], s.hands[target]] = [s.hands[target], s.hands[p]];
   s.phase = 'play';
   s.chooser = null;
   events.push({ type: 'swap', player: p, target });

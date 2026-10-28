@@ -51,6 +51,18 @@ describe('scoring', () => {
   });
 });
 
+describe('last player standing', () => {
+  it('wins and scores only the other hands', () => {
+    const { state } = newMatch({ ...DEFAULT_SETTINGS, playerCount: 3 }, 1);
+    state.game = makeGame({ hands: [[num('blue', 1)], [num('blue', 9), num('green', 4)], [num('yellow', 3)]], top: num('red', 9), drawPile: [], current: 0 });
+    state.game.lastPlayer = 1;
+    state.game.out[2] = true;
+    const m = apply(state, { type: 'draw', player: 0 });
+    expect(m.lastResult).toMatchObject({ winner: 1, lastStanding: true, points: 1 + 3, leftover: [1, 13, 3] });
+    expect(m.scores).toEqual([0, 4, 0]);
+  });
+});
+
 describe('cpu', () => {
   it('finds sum combos on hard', () => {
     const hand = [num('green', 2), num('red', 2), num('blue', 3), num('yellow', 11)];
@@ -66,7 +78,6 @@ describe('cpu', () => {
       pile: pileOf(g),
       stack: null,
       difficulty: 'hard',
-      canDraw: true,
       nextHandCount: 5, minOtherHandCount: 5,
       rand: Math.random,
     });
@@ -76,7 +87,7 @@ describe('cpu', () => {
   it('prefers dumping high points on medium', () => {
     const hand = [num('red', 1), num('red', 12), num('blue', 4)];
     const g = makeGame({ hands: [hand, []], top: num('red', 3) });
-    const move = cpuMove({ hand, pile: pileOf(g), stack: null, difficulty: 'medium', canDraw: true, nextHandCount: 5, minOtherHandCount: 5, rand: () => 0 });
+    const move = cpuMove({ hand, pile: pileOf(g), stack: null, difficulty: 'medium', nextHandCount: 5, minOtherHandCount: 5, rand: () => 0 });
     expect(move).toEqual({ type: 'play', cardIds: [hand[1].id] });
   });
 
@@ -87,7 +98,7 @@ describe('cpu', () => {
   it('never picks a play that scores fewer points than an alternative on medium', () => {
     const hand = [num('red', 2), num('red', 9)];
     const g = makeGame({ hands: [hand, []], top: num('red', 3) });
-    const move = cpuMove({ hand, pile: pileOf(g), stack: null, difficulty: 'medium', canDraw: true, nextHandCount: 5, minOtherHandCount: 5, rand: () => 0 });
+    const move = cpuMove({ hand, pile: pileOf(g), stack: null, difficulty: 'medium', nextHandCount: 5, minOtherHandCount: 5, rand: () => 0 });
     const ids = move?.type === 'play' ? move.cardIds : [];
     expect(cardPoints(hand.find((c) => c.id === ids[0])!)).toBe(9);
   });

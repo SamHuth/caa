@@ -30,8 +30,9 @@ export function makeGame(opts: {
     direction: 1,
     chooser: null,
     pendingDraw: 0,
-    pendingKind: null,
     drawnThisTurn: 0,
+    out: opts.hands.map(() => false),
+    lastPlayer: null,
     winner: null,
     turn: 0,
   };

@@ -1,7 +1,6 @@
 import { type Card, COLOURS, type Colour, compareCards, isWild, sameFace } from '../../engine/cards';
 import type { MatchEvent } from '../../engine/match';
-import { MAX_DRAW } from '../../engine/game';
-import { type PlayContext, checkPlay, drawAmount } from '../../engine/rules';
+import { type PlayContext, checkPlay } from '../../engine/rules';
 import { type ClientView, type HostMsg, REACTIONS, type ReactionKey, type Transport } from '../../net/protocol';
 import { go } from '../app';
 import { cardBack, cardEl } from '../cardEl';
@@ -52,11 +51,16 @@ export class GameScreen {
   private colourModal: Modal | null = null;
   private swapModal: Modal | null = null;
   /** Seat for each swap option (null = keep my hand), indexed by the 1–9 keys. */
-  private swapOptions: (number | null)[] = [];
+  private swapOptions: number[] = [];
   private direction = h('div', { class: 'direction', 'aria-hidden': 'true' }, '↻');
   private resultModal: Modal | null = null;
   private resultKey = '';
   private countdown: ReturnType<typeof setInterval> | undefined;
+  /** Game clock, synced from the host's elapsed time on every update. */
+  private clock = h('span', { class: 'pill clock', 'aria-label': 'Game time' }, '⏱ 0:00');
+  private clockBase = Date.now();
+  private clockRunning = false;
+  private clockTimer = setInterval(() => this.tickClock(), 1000);
   private input: HandInput;
   private resize = new ResizeObserver(() => (this.layoutHand(), this.pointAtActor()));
   /** Arrow orbiting the pile that points at whoever must act. */
@@ -86,7 +90,12 @@ export class GameScreen {
     this.el = h(
       'main',
       { class: 'screen game' },
-      h('header', { class: 'game-top' }, this.info, h('button', { class: 'btn-icon', 'aria-label': 'Leave game', onclick: () => this.confirmLeave() }, '✕')),
+      h(
+        'header',
+        { class: 'game-top' },
+        this.info,
+        h('div', { class: 'top-right' }, this.clock, h('button', { class: 'btn-icon', 'aria-label': 'Leave game', onclick: () => this.confirmLeave() }, '✕')),
+      ),
       this.table,
       h(
         'section',
@@ -120,6 +129,7 @@ export class GameScreen {
     this.input.destroy();
     this.resize.disconnect();
     clearInterval(this.countdown);
+    clearInterval(this.clockTimer);
     clearTimeout(this.freshTimer);
     this.colourModal?.close();
     this.swapModal?.close();
@@ -197,12 +207,21 @@ export class GameScreen {
       h('span', { class: 'pill subtle' }, `First to ${v.settings.roundScoreLimit} · Bo${v.settings.bestOf}`),
     );
     this.table.classList.toggle('live', v.matchPhase === 'playing');
+    this.clockBase = Date.now() - v.gameElapsedMs;
+    this.clockRunning = v.matchPhase === 'playing';
+    this.tickClock(v.gameElapsedMs);
     this.renderSeats();
     this.renderPiles();
     this.renderMe();
     this.renderHand();
     this.pointAtActor();
     this.announceTurn();
+  }
+
+  private tickClock(elapsed = this.clockRunning ? Date.now() - this.clockBase : null) {
+    if (elapsed === null) return;
+    const secs = Math.floor(elapsed / 1000);
+    this.clock.textContent = `⏱ ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
   }
 
   private pointAtActor() {
@@ -238,7 +257,13 @@ export class GameScreen {
   /** Draw button: take a stack, or draw-until-playable once per turn. */
   private get canDraw() {
     const v = this.view!;
-    return this.myTurn && (v.stack !== null || v.drawnThisTurn < MAX_DRAW);
+    return this.myTurn && (v.stack !== null || !this.canPlay);
+  }
+
+  /** You only draw while you can't play (mirrors the engine). */
+  private get canPlay() {
+    const v = this.view!;
+    return v.hand.some((c) => checkPlay([c], this.playContext(true)).ok);
   }
 
   private playContext(isTurn: boolean): PlayContext {
@@ -272,7 +297,7 @@ export class GameScreen {
     return h(
       'div',
       {
-        class: `seat ${isActor ? 'active' : ''} ${info.cpu ? 'cpu' : ''} ${info.connected ? '' : 'away'}`,
+        class: `seat ${isActor ? 'active' : ''} ${info.cpu ? 'cpu' : ''} ${info.connected ? '' : 'away'} ${v.out[seat] ? 'out' : ''}`,
         'data-seat': seat,
         style: pos,
       },
@@ -285,7 +310,8 @@ export class GameScreen {
         h('span', { class: 'seat-score', title: 'Score this round' }, `${v.scores[seat]}`),
         v.roundWins[seat] ? h('span', { class: 'seat-wins', title: 'Rounds won' }, '★'.repeat(v.roundWins[seat])) : null,
       ),
-      v.handCounts[seat] === 1 && v.matchPhase === 'playing' ? h('span', { class: 'last-card' }, 'Last card!') : null,
+      v.out[seat] && v.matchPhase === 'playing' ? h('span', { class: 'out-tag' }, 'OUT') : null,
+      v.handCounts[seat] === 1 && v.matchPhase === 'playing' && !v.out[seat] ? h('span', { class: 'last-card' }, 'Last card!') : null,
     );
   }
 
@@ -315,7 +341,11 @@ export class GameScreen {
 
   private renderPiles() {
     const v = this.view!;
-    this.drawPile.replaceChildren(cardBack('stack-3'), cardBack('stack-2'), cardBack(), h('span', { class: 'pile-count' }, String(v.drawCount)));
+    this.drawPile.replaceChildren(
+      ...(v.drawCount > 0
+        ? [cardBack('stack-3'), cardBack('stack-2'), cardBack(), h('span', { class: 'pile-count' }, String(v.drawCount))]
+        : [h('span', { class: 'pile-empty' }, 'Empty'), h('span', { class: 'pile-count' }, 'Pass = out')]),
+    );
     this.drawPile.disabled = !this.canDraw;
     this.drawPile.classList.toggle('hot', this.canDraw);
 
@@ -336,8 +366,10 @@ export class GameScreen {
     if (v.matchPhase !== 'playing') text = '';
     else if (v.gamePhase === 'chooseColour') text = actor === v.you ? 'Pick a colour' : `${name} is picking a colour…`;
     else if (v.gamePhase === 'chooseSwap') text = actor === v.you ? 'Pick a hand to swap with' : `${name} is choosing a hand to swap…`;
-    else if (v.stack) text = actor === v.you ? `Stack a ${v.stack.kind === 'draw2' ? 'Draw 2' : 'Draw 4'} or take +${v.stack.count}` : `${name} faces +${v.stack.count}`;
-    else if (actor === v.you) text = v.drawnThisTurn > 0 ? `Play, or keep drawing (${MAX_DRAW - v.drawnThisTurn} left)` : 'Your turn';
+    else if (v.out[v.you]) text = `You're out · ${name}'s turn`;
+    else if (v.stack) text = actor === v.you ? `Stack a Draw 2 or Draw 4, or take +${v.stack.count}` : `${name} faces +${v.stack.count}`;
+    else if (actor === v.you && !this.canPlay) text = v.drawCount === 0 ? "Can't play: pass and you're out" : 'Draw until you can play';
+    else if (actor === v.you) text = 'Your turn';
     else text = `${name}'s turn`;
     this.status.textContent = text;
     this.direction.textContent = v.direction === 1 ? '↻' : '↺';
@@ -363,7 +395,13 @@ export class GameScreen {
         'div',
         { class: 'me-info' },
         h('div', { class: 'seat-name' }, v.seats[v.you].name),
-        h('div', { class: 'seat-meta' }, h('span', { class: 'seat-score' }, `${v.scores[v.you]} pts`), v.roundWins[v.you] ? h('span', { class: 'seat-wins' }, '★'.repeat(v.roundWins[v.you])) : null),
+        h(
+          'div',
+          { class: 'seat-meta' },
+          h('span', { class: 'seat-score' }, `${v.scores[v.you]} pts`),
+          v.roundWins[v.you] ? h('span', { class: 'seat-wins' }, '★'.repeat(v.roundWins[v.you])) : null,
+          v.out[v.you] && v.matchPhase === 'playing' ? h('span', { class: 'out-tag' }, 'OUT') : null,
+        ),
       ),
     );
     const fill = this.timerBar.firstElementChild as HTMLElement;
@@ -378,7 +416,7 @@ export class GameScreen {
       });
     }
     this.drawBtn.disabled = !this.canDraw;
-    this.drawBtn.textContent = this.myTurn && v.stack ? `Take +${v.stack.count}` : this.myTurn && v.drawnThisTurn > 0 ? `Draw (${MAX_DRAW - v.drawnThisTurn})` : 'Draw';
+    this.drawBtn.textContent = v.drawCount === 0 && this.canDraw ? 'Pass (out)' : this.myTurn && v.stack ? `Take +${v.stack.count}` : 'Draw';
     this.el.classList.toggle('my-turn', isActor);
   }
 
@@ -400,7 +438,7 @@ export class GameScreen {
 
   private canJumpIn(c: Card) {
     const v = this.view!;
-    return v.matchPhase === 'playing' && v.gamePhase === 'play' && v.current !== v.you && checkPlay([c], this.playContext(false)).ok;
+    return v.matchPhase === 'playing' && v.gamePhase === 'play' && v.current !== v.you && !v.out[v.you] && checkPlay([c], this.playContext(false)).ok;
   }
 
   /** Overlap cards so they fit, but keep each one's visible strip big enough to tap. */
@@ -438,6 +476,7 @@ export class GameScreen {
   private send() {
     const v = this.view;
     if (!v || this.pending || v.matchPhase !== 'playing') return;
+    if (v.out[v.you]) return toast("You're out of this game");
     if (this.selected.length === 0) return toast('Tap cards to select them first');
     const cards = this.selected.map((id) => v.hand.find((c) => c.id === id)!);
     if (v.gamePhase === 'chooseColour') return this.reject('Wait for a colour to be picked');
@@ -473,7 +512,7 @@ export class GameScreen {
     this.colourModal = null;
   }
 
-  private pickSwap(target: number | null) {
+  private pickSwap(target: number) {
     this.transport.send({ type: 'swap', target });
     this.swapModal?.close();
     this.swapModal = null;
@@ -523,14 +562,13 @@ export class GameScreen {
           break;
         }
         case 'stack':
-          if (v.stack && e.total > drawAmount(v.stack.kind)) this.flashBanner(`Stacked! +${e.total}`, 'bad');
+          if (e.total > e.added) this.flashBanner(`Stacked! +${e.total}`, 'bad');
           break;
         case 'reverse':
           this.flashBanner(`⇄ Reverse! Now going ${e.direction === 1 ? 'clockwise' : 'anticlockwise'}`);
           break;
         case 'swap':
-          if (e.target === null) this.flashBanner(`${nameOf(e.player)} kept ${e.player === v.you ? 'your' : 'their'} hand`);
-          else this.flashBanner(`🔀 ${nameOf(e.player)} swapped hands with ${e.target === v.you ? 'you' : nameOf(e.target)}!`, 'jump');
+          this.flashBanner(`🔀 ${nameOf(e.player)} swapped hands with ${e.target === v.you ? 'you' : nameOf(e.target)}!`, 'jump');
           break;
         case 'rotate':
           this.flashBanner('🔄 Everyone passes their hand on!', 'jump');
@@ -541,8 +579,9 @@ export class GameScreen {
         case 'colour':
           this.flashBanner(`${nameOf(e.player)} picked ${e.colour}`, e.colour);
           break;
-        case 'reshuffle':
-          this.flashBanner('Reshuffling the pile…');
+        case 'out':
+          this.seatBadge(e.player, 'Out!');
+          this.flashBanner(e.player === v.you ? "No cards left to draw: you're out!" : `${nameOf(e.player)} is out!`, 'bad');
           break;
         case 'newGame':
           this.flashBanner(e.gameNumber === 1 ? `Round ${e.round}` : `Game ${e.gameNumber}`);
@@ -658,22 +697,22 @@ export class GameScreen {
 
   private showSwapPicker() {
     const v = this.view!;
-    // Offer seats in turn order from you.
-    const others = v.seats.map((_, k) => (v.you + k * v.direction + v.seats.length * 2) % v.seats.length).slice(1);
-    this.swapOptions = [...others, null];
+    // Offer seats still in the game, in turn order from you. Swapping is compulsory.
+    this.swapOptions = v.seats
+      .map((_, k) => (v.you + k * v.direction + v.seats.length * 2) % v.seats.length)
+      .slice(1)
+      .filter((seat) => !v.out[seat]);
     const buttons = this.swapOptions.map((seat, i) =>
-      seat === null
-        ? h('button', { class: 'btn btn-ghost swap-keep', onclick: () => this.pickSwap(null) }, 'Keep my hand ', h('kbd', {}, String(i + 1)))
-        : h(
-            'button',
-            { class: 'swap-btn', onclick: () => this.pickSwap(seat) },
-            h('span', { class: 'swap-name' }, v.seats[seat].name),
-            h('span', { class: 'swap-count' }, `${v.handCounts[seat]} card${v.handCounts[seat] === 1 ? '' : 's'}`),
-            h('kbd', {}, String(i + 1)),
-          ),
+      h(
+        'button',
+        { class: 'swap-btn', onclick: () => this.pickSwap(seat) },
+        h('span', { class: 'swap-name' }, v.seats[seat].name),
+        h('span', { class: 'swap-count' }, `${v.handCounts[seat]} card${v.handCounts[seat] === 1 ? '' : 's'}`),
+        h('kbd', {}, String(i + 1)),
+      ),
     );
     this.swapModal = modal(
-      [h('h2', {}, 'Swap hands?'), h('p', { class: 'hint' }, `You have ${v.hand.length} cards. Pick a player to swap with.`), h('div', { class: 'swap-list' }, ...buttons)],
+      [h('h2', {}, 'Swap hands!'), h('p', { class: 'hint' }, `You have ${v.hand.length} cards. Pick a player to swap with.`), h('div', { class: 'swap-list' }, ...buttons)],
       { class: 'swap-modal' },
     );
   }
@@ -717,7 +756,8 @@ export class GameScreen {
     tick();
     this.countdown = setInterval(tick, 250);
     return modal([
-      h('h2', {}, `${name} went out!`),
+      h('h2', {}, r.lastStanding ? `${name} ${name === 'You' ? 'win' : 'wins'}: last to play!` : `${name} went out!`),
+      r.lastStanding ? h('p', { class: 'center hint' }, 'The draw pile ran out and everyone else was knocked out.') : null,
       h('p', { class: 'big-points' }, `+${r.points} points`),
       r.roundWinner !== null ? h('h3', { class: 'round-win' }, `🏆 ${name === 'You' ? 'You win' : `${name} wins`} round ${v.round}!`) : null,
       this.scoreboard(),

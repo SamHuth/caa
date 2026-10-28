@@ -1,5 +1,5 @@
-import { cpuColour, cpuJumpIn, cpuMove, cpuSwapTarget, cpuThinkMs } from '../engine/cpu';
-import { MAX_DRAW, nextPlayer, pileOf, stackOf, topCard } from '../engine/game';
+import { cpuColour, cpuJumpIn, cpuMove, cpuThinkMs } from '../engine/cpu';
+import { activePlayers, nextPlayer, pileOf, smallestOtherHand, stackOf, topCard } from '../engine/game';
 import { type MatchAction, type MatchEvent, type MatchState, type Settings, newMatch, reduceMatch } from '../engine/match';
 import { randomSeed } from '../engine/rng';
 import { redact, redactEvents } from '../engine/view';
@@ -29,6 +29,9 @@ export class HostSession {
   private jumpTimers: Timer[] = [];
   private plannedTop = -1;
   private turnDeadline: number | null = null;
+  /** Game clock: when the current game started, and when it ended (frozen between games). */
+  private gameStartedAt = Date.now();
+  private gameEndedAt: number | null = null;
   private nextGameAt: number | null = null;
   /** CPU reaction timers: independent of game timers so state changes don't cancel them. */
   private reactTimers = new Set<Timer>();
@@ -109,7 +112,10 @@ export class HostSession {
   private afterChange(events: MatchEvent[]) {
     this.clearTimers();
     this.cpuReactions(events);
+    if (events.some((e) => e.type === 'gameOver')) this.gameEndedAt = Date.now();
     if (events.some((e) => e.type === 'newGame')) {
+      this.gameStartedAt = Date.now();
+      this.gameEndedAt = null;
       // Card ids repeat between games, so forget the previous jump-in plans.
       this.clearJumpTimers();
       this.plannedTop = -1;
@@ -167,6 +173,7 @@ export class HostSession {
       seats: this.seats,
       turnMsLeft: this.turnDeadline === null ? null : Math.max(0, this.turnDeadline - now),
       nextGameMs: this.nextGameAt === null ? null : Math.max(0, this.nextGameAt - now),
+      gameElapsedMs: (this.gameEndedAt ?? now) - this.gameStartedAt,
     };
     return { t: 'state', view, events: redactEvents(events, seat) };
   }
@@ -203,7 +210,7 @@ export class HostSession {
           return;
         }
         if (g.phase === 'chooseSwap') {
-          this.apply(actor, { type: 'swap', player: actor, target: cpuSwapTarget(g.hands, actor) });
+          this.apply(actor, { type: 'swap', player: actor, target: smallestOtherHand(g, actor) });
           return;
         }
         const move = cpuMove({
@@ -211,12 +218,11 @@ export class HostSession {
           pile: pileOf(g),
           stack: stackOf(g),
           difficulty,
-          canDraw: g.drawnThisTurn < MAX_DRAW,
           nextHandCount: g.hands[nextPlayer(g)].length,
-          minOtherHandCount: Math.min(...g.hands.filter((_, i) => i !== actor).map((h) => h.length)),
+          minOtherHandCount: Math.min(...activePlayers(g).filter((i) => i !== actor).map((i) => g.hands[i].length)),
           rand: Math.random,
         });
-        this.apply(actor, move ? { ...move, player: actor } : { type: 'timeout', player: actor });
+        this.apply(actor, { ...move, player: actor });
       });
     } else {
       const ms = this.settings.turnTimer * 1000;
@@ -232,7 +238,7 @@ export class HostSession {
       this.clearJumpTimers();
       this.plannedTop = top.id;
       g.hands.forEach((hand, seat) => {
-        if (seat === g.current || !this.isBot(seat)) return;
+        if (seat === g.current || !this.isBot(seat) || g.out[seat]) return;
         const plan = cpuJumpIn(hand, pileOf(g), stackOf(g), difficulty, Math.random);
         if (!plan) return;
         this.jumpTimers.push(
