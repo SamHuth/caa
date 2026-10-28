@@ -9,8 +9,15 @@ export type ClientAction =
   | { type: 'chooseColour'; colour: Colour }
   | { type: 'swap'; target: number | null };
 
+export interface Avatar {
+  emoji: string;
+  /** Background colour, one of the profile palette's hex values. */
+  colour: string;
+}
+
 export interface SeatInfo {
   name: string;
+  avatar: Avatar;
   cpu: boolean;
   /** false when a human has dropped and a CPU is covering their seat. */
   connected: boolean;
@@ -26,6 +33,7 @@ export interface ClientView extends PlayerView {
 
 export interface LobbyPlayer {
   name: string;
+  avatar: Avatar;
   ready: boolean;
   host: boolean;
   connected: boolean;
@@ -47,7 +55,7 @@ export type HostMsg =
   | { t: 'closed'; reason: string };
 
 export type GuestMsg =
-  | { t: 'join'; name: string; token: string }
+  | { t: 'join'; name: string; avatar: Avatar; token: string }
   | { t: 'ready'; ready: boolean }
   | { t: 'action'; action: ClientAction }
   | { t: 'pong'; ts: number }

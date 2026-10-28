@@ -19,8 +19,8 @@ export interface GameState extends Seeded {
   /** Stacked draw penalty facing the current player (0 = none). */
   pendingDraw: number;
   pendingKind: DrawKind | null;
-  /** Current player has already drawn this turn (draws run until a playable card). */
-  hasDrawn: boolean;
+  /** Cards the current player has drawn this turn, one per draw (max MAX_DRAW). */
+  drawnThisTurn: number;
   winner: number | null;
   /** Increments whenever the turn changes hands; used to invalidate timers. */
   turn: number;
@@ -28,7 +28,7 @@ export interface GameState extends Seeded {
 
 export type GameAction =
   | { type: 'play'; player: number; cardIds: number[] }
-  /** Draw until playable — or, when facing a stack, take the whole stack. */
+  /** Draw one card — or, when facing a stack, take the whole stack. */
   | { type: 'draw'; player: number }
   | { type: 'chooseColour'; player: number; colour: Colour }
   /** After a single 7: swap hands with `target`, or null to keep your own. */
@@ -52,7 +52,7 @@ export type Reduced<S, E> = { ok: true; state: S; events: E[] } | { ok: false; r
 
 export const TIMEOUT_PENALTY = 2;
 export const SMILEY_PENALTY = 2;
-/** Drawing stops after this many cards; if none were playable the turn passes. */
+/** Most cards a player can draw in one turn; after the last, the turn passes if nothing is playable. */
 export const MAX_DRAW = 10;
 
 export function topCard(s: GameState): Card {
@@ -86,7 +86,7 @@ export function newGame(players: number, handSize: number, seed: number): { stat
     chooser: null,
     pendingDraw: 0,
     pendingKind: null,
-    hasDrawn: false,
+    drawnThisTurn: 0,
     winner: null,
     turn: 0,
   };
@@ -127,7 +127,7 @@ function drawOne(s: GameState, events: GameEvent[]): Card | undefined {
 
 function advance(s: GameState, steps: number, events: GameEvent[]) {
   s.current = nextPlayer(s, s.current, steps);
-  s.hasDrawn = false;
+  s.drawnThisTurn = 0;
   s.turn++;
   events.push({ type: 'turn', player: s.current });
 }
@@ -186,7 +186,7 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         s.current = p;
         s.turn++;
       }
-      s.hasDrawn = false;
+      s.drawnThisTurn = 0;
 
       const last = cards[cards.length - 1];
       if (last.colour) s.colour = last.colour;
@@ -272,20 +272,19 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         takeStack(s, events);
         break;
       }
-      if (s.hasDrawn) return { ok: false, reason: 'You already drew — play a card' };
-      // Draw one at a time until a playable card turns up, up to MAX_DRAW cards.
-      const drawn: Card[] = [];
-      let playable = false;
-      while (!playable && drawn.length < MAX_DRAW) {
-        const card = drawOne(s, events);
-        if (!card) break;
-        s.hands[p].push(card);
-        drawn.push(card);
-        playable = canPlaySingle(card, pileOf(s));
+      if (s.drawnThisTurn >= MAX_DRAW) return { ok: false, reason: `You've drawn ${MAX_DRAW} — play a card` };
+      // One card per draw; the player decides whether to keep drawing.
+      const card = drawOne(s, events);
+      if (!card) {
+        // Nothing left anywhere to draw.
+        events.push({ type: 'draw', player: p, count: 0, cards: [], reason: 'draw' });
+        advance(s, 1, events);
+        break;
       }
-      events.push({ type: 'draw', player: p, count: drawn.length, cards: drawn, reason: 'draw' });
-      s.hasDrawn = true;
-      if (!playable) advance(s, 1, events);
+      s.hands[p].push(card);
+      s.drawnThisTurn++;
+      events.push({ type: 'draw', player: p, count: 1, cards: [card], reason: 'draw' });
+      if (s.drawnThisTurn >= MAX_DRAW && !s.hands[p].some((c) => canPlaySingle(c, pileOf(s)))) advance(s, 1, events);
       break;
     }
 

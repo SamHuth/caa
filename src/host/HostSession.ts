@@ -1,5 +1,5 @@
 import { cpuColour, cpuJumpIn, cpuMove, cpuSwapTarget, cpuThinkMs } from '../engine/cpu';
-import { nextPlayer, pileOf, stackOf, topCard } from '../engine/game';
+import { MAX_DRAW, nextPlayer, pileOf, stackOf, topCard } from '../engine/game';
 import { type MatchAction, type MatchEvent, type MatchState, type Settings, newMatch, reduceMatch } from '../engine/match';
 import { randomSeed } from '../engine/rng';
 import { redact, redactEvents } from '../engine/view';
@@ -132,7 +132,9 @@ export class HostSession {
     const actor = g.chooser ?? g.current;
     const turn = g.turn;
     if (this.isBot(actor)) {
-      this.later(cpuThinkMs(difficulty, Math.random), () => {
+      // Follow-up draws in the same turn are quick; the first decision takes "thinking" time.
+      const think = g.drawnThisTurn > 0 ? 400 + Math.random() * 300 : cpuThinkMs(difficulty, Math.random);
+      this.later(think, () => {
         const g = this.m.game;
         if (g.turn !== turn || this.m.phase !== 'playing') return;
         if (g.phase === 'chooseColour') {
@@ -148,7 +150,7 @@ export class HostSession {
           pile: pileOf(g),
           stack: stackOf(g),
           difficulty,
-          hasDrawn: g.hasDrawn,
+          canDraw: g.drawnThisTurn < MAX_DRAW,
           nextHandCount: g.hands[nextPlayer(g)].length,
           minOtherHandCount: Math.min(...g.hands.filter((_, i) => i !== actor).map((h) => h.length)),
           rand: Math.random,

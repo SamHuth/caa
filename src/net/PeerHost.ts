@@ -2,13 +2,14 @@ import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import { HostSession, LocalTransport } from '../host/HostSession';
 import type { Settings } from '../engine/match';
-import { cpuNames } from '../ui/names';
+import { type Profile, cpuSeats, sanitiseProfile } from '../ui/profile';
 import { PEER_TIMEOUT_MS, PING_MS, createPeer, peerIdFor, randomCode } from './peer';
-import type { GuestMsg, HostMsg, LobbyInfo, SeatInfo } from './protocol';
+import type { Avatar, GuestMsg, HostMsg, LobbyInfo, SeatInfo } from './protocol';
 
 interface Guest {
   token: string;
   name: string;
+  avatar: Avatar;
   ready: boolean;
   conn: DataConnection | null;
   lastSeen: number;
@@ -27,7 +28,7 @@ export class PeerHost {
   private constructor(
     private peer: Peer,
     readonly code: string,
-    readonly hostName: string,
+    readonly host: Profile,
     readonly settings: Settings,
   ) {
     peer.on('connection', (conn) => this.accept(conn));
@@ -35,15 +36,15 @@ export class PeerHost {
     this.pingTimer = setInterval(() => this.tick(), PING_MS);
   }
 
-  static create(hostName: string, settings: Settings, attempts = 4): Promise<PeerHost> {
+  static create(host: Profile, settings: Settings, attempts = 4): Promise<PeerHost> {
     return new Promise((resolve, reject) => {
       const code = randomCode();
       const peer = createPeer(peerIdFor(code));
-      peer.once('open', () => resolve(new PeerHost(peer, code, hostName, settings)));
+      peer.once('open', () => resolve(new PeerHost(peer, code, host, settings)));
       peer.once('error', (err) => {
         peer.destroy();
         if (err.type === 'unavailable-id' && attempts > 1) {
-          PeerHost.create(hostName, settings, attempts - 1).then(resolve, reject);
+          PeerHost.create(host, settings, attempts - 1).then(resolve, reject);
         } else {
           reject(new Error(err.type === 'network' ? "Couldn't reach the matchmaking server" : err.message));
         }
@@ -61,8 +62,8 @@ export class PeerHost {
       code: this.code,
       settings: this.settings,
       players: [
-        { name: this.hostName, ready: true, host: true, connected: true },
-        ...connected.map((g) => ({ name: g.name, ready: g.ready, host: false, connected: true })),
+        { ...this.host, ready: true, host: true, connected: true },
+        ...connected.map((g) => ({ name: g.name, avatar: g.avatar, ready: g.ready, host: false, connected: true })),
       ],
       you: forGuest ? connected.indexOf(forGuest) + 1 : 0,
     };
@@ -76,11 +77,10 @@ export class PeerHost {
   start(): LocalTransport {
     const players = this.guests.filter((g) => g.conn);
     this.guests = players;
-    const names = cpuNames(this.settings.playerCount - players.length - 1);
     const seats: SeatInfo[] = [
-      { name: this.hostName, cpu: false, connected: true },
-      ...players.map((g) => ({ name: g.name, cpu: false, connected: true })),
-      ...names.map((name) => ({ name, cpu: true, connected: true })),
+      { ...this.host, cpu: false, connected: true },
+      ...players.map((g) => ({ name: g.name, avatar: g.avatar, cpu: false, connected: true })),
+      ...cpuSeats(this.settings.playerCount - players.length - 1, [this.host.name, ...players.map((g) => g.name)]),
     ];
     players.forEach((g, i) => (g.seat = i + 1));
     this.session = new HostSession(seats, this.settings);
@@ -105,7 +105,7 @@ export class PeerHost {
   }
 
   private receive(conn: DataConnection, msg: GuestMsg) {
-    if (msg.t === 'join') return this.join(conn, msg.name, msg.token);
+    if (msg.t === 'join') return this.join(conn, msg);
     const g = this.guests.find((g) => g.conn === conn);
     if (!g) return;
     g.lastSeen = Date.now();
@@ -128,13 +128,16 @@ export class PeerHost {
     }
   }
 
-  private join(conn: DataConnection, name: string, token: string) {
+  private join(conn: DataConnection, msg: Extract<GuestMsg, { t: 'join' }>) {
+    const { token } = msg;
+    const { name, avatar } = sanitiseProfile(msg.name, msg.avatar);
     const existing = this.guests.find((g) => g.token === token);
     if (existing) {
       // Rejoin (e.g. refreshed tab): take back the seat.
       existing.conn?.close();
       existing.conn = conn;
       existing.name = name;
+      existing.avatar = avatar;
       existing.lastSeen = Date.now();
       if (this.session && existing.seat !== null) {
         this.session.attach(existing.seat, (msg) => this.send(existing, msg));
@@ -150,7 +153,7 @@ export class PeerHost {
     };
     if (this.session) return refuse('That game has already started');
     if (this.guests.filter((g) => g.conn).length >= this.settings.playerCount - 1) return refuse('That room is full');
-    this.guests.push({ token, name, ready: false, conn, lastSeen: Date.now(), rtt: 100, seat: null });
+    this.guests.push({ token, name, avatar, ready: false, conn, lastSeen: Date.now(), rtt: 100, seat: null });
     this.broadcastLobby();
   }
 

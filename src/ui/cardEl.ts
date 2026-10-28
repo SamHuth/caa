@@ -1,4 +1,4 @@
-import { type Card, cardLabel } from '../engine/cards';
+import { type Card, type Colour, cardLabel } from '../engine/cards';
 import { h } from './dom';
 
 function face(card: Card): string {
@@ -18,15 +18,16 @@ function face(card: Card): string {
   }
 }
 
-export function cardEl(card: Card, extraClass = ''): HTMLDivElement {
+/** `paint` shows a wild / draw 4 in the colour chosen for it. */
+export function cardEl(card: Card, extraClass = '', paint?: Colour): HTMLDivElement {
   const f = face(card);
-  const colourClass = card.colour ? `c-${card.colour}` : 'c-wild';
+  const colourClass = card.colour ? `c-${card.colour}` : paint ? `c-${paint} painted` : 'c-wild';
   return h(
     'div',
     {
       class: `card ${colourClass} k-${card.kind} ${card.value === 6 || card.value === 9 ? 'six-nine' : ''} ${card.smiley ? 'smiley' : ''} ${extraClass}`,
       'data-id': card.id,
-      'aria-label': cardLabel(card),
+      'aria-label': paint ? `${cardLabel(card)} (${paint})` : cardLabel(card),
     },
     h('span', { class: 'corner tl' }, f),
     h('span', { class: 'pip' }, h('span', { class: 'face' }, f)),

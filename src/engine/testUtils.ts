@@ -31,7 +31,7 @@ export function makeGame(opts: {
     chooser: null,
     pendingDraw: 0,
     pendingKind: null,
-    hasDrawn: false,
+    drawnThisTurn: 0,
     winner: null,
     turn: 0,
   };

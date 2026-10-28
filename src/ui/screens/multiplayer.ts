@@ -1,6 +1,7 @@
 import { CODE_LENGTH, normaliseCode } from '../../net/peer';
 import { PeerGuest } from '../../net/PeerGuest';
-import { go, playerName } from '../app';
+import { go } from '../app';
+import { profile } from '../profile';
 import { h } from '../dom';
 
 export function multiplayerScreen(prefill: string) {
@@ -31,7 +32,7 @@ export function multiplayerScreen(prefill: string) {
     join.disabled = true;
     join.textContent = 'Joining…';
     try {
-      const guest = await PeerGuest.join(code.value, playerName.display());
+      const guest = await PeerGuest.join(code.value, profile.get());
       guest.onMessage((msg) => {
         if (msg.t === 'lobby') go.guestLobby(guest, msg.lobby);
         else if (msg.t === 'state') go.game(guest, msg); // rejoined a game in progress

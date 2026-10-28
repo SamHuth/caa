@@ -17,7 +17,7 @@ export interface PlayerView {
   matchPhase: MatchState['phase'];
   /** Player picking a colour or a hand to swap with. */
   chooser: number | null;
-  hasDrawn: boolean;
+  drawnThisTurn: number;
   /** Draw penalty stacked on the current player, if any. */
   stack: DrawStack | null;
   turn: number;
@@ -43,7 +43,7 @@ export function redact(m: MatchState, seat: number): PlayerView {
     direction: g.direction,
     matchPhase: m.phase,
     chooser: g.chooser,
-    hasDrawn: g.hasDrawn,
+    drawnThisTurn: g.drawnThisTurn,
     stack: stackOf(g),
     turn: g.turn,
     scores: m.scores,

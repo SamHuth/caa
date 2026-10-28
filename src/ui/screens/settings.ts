@@ -1,6 +1,7 @@
 import { type Difficulty, LIMITS, type Settings, maxHandSize } from '../../engine/match';
 import { PeerHost } from '../../net/PeerHost';
-import { go, playerName, savedSettings } from '../app';
+import { go, savedSettings } from '../app';
+import { profile } from '../profile';
 import { h, toast } from '../dom';
 
 function stepper(label: string, get: () => number, set: (v: number) => void, opts: { min: () => number; max: () => number; step?: number; unit?: string }) {
@@ -43,7 +44,7 @@ export function settingsScreen(mode: 'single' | 'host') {
     start.disabled = true;
     start.textContent = 'Creating room…';
     try {
-      go.hostLobby(await PeerHost.create(playerName.display(), { ...s }));
+      go.hostLobby(await PeerHost.create(profile.get(), { ...s }));
     } catch (err) {
       toast((err as Error).message, 'error');
       start.disabled = false;

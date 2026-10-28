@@ -10,7 +10,8 @@ export interface CpuContext {
   pile: Pile;
   stack: DrawStack | null;
   difficulty: Difficulty;
-  hasDrawn: boolean;
+  /** Whether another card may be drawn this turn. */
+  canDraw: boolean;
   /** Hand size of the player who plays after this CPU. */
   nextHandCount: number;
   /** Smallest hand among the other players (makes a 7 swap tempting). */
@@ -78,7 +79,7 @@ export function cpuMove(ctx: CpuContext): CpuMove | null {
     sums: difficulty === 'hard',
   });
   // Facing a stack with nothing to add: take it.
-  if (plays.length === 0) return ctx.stack || !ctx.hasDrawn ? { type: 'draw' } : null;
+  if (plays.length === 0) return ctx.stack || ctx.canDraw ? { type: 'draw' } : null;
 
   let best: Card[];
   if (difficulty === 'easy') {

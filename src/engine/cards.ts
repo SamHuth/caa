@@ -63,6 +63,14 @@ export function sameFace(a: Card, b: Card): boolean {
   return a.kind === b.kind && a.colour === b.colour && a.value === b.value;
 }
 
+const KIND_ORDER: Record<CardKind, number> = { number: 0, skip: 1, reverse: 2, draw2: 3, wild: 4, draw4: 5 };
+
+/** Hand order: by colour (wilds last), then numbers ascending, then action cards. */
+export function compareCards(a: Card, b: Card): number {
+  const colour = (c: Card) => (c.colour ? COLOURS.indexOf(c.colour) : COLOURS.length);
+  return colour(a) - colour(b) || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.value ?? 0) - (b.value ?? 0) || a.id - b.id;
+}
+
 const KIND_LABEL: Record<CardKind, string> = {
   number: '',
   skip: 'Skip',

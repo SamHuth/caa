@@ -1,5 +1,6 @@
-import { type Card, COLOURS, type Colour, sameFace } from '../../engine/cards';
+import { type Card, COLOURS, type Colour, compareCards, isWild, sameFace } from '../../engine/cards';
 import type { MatchEvent } from '../../engine/match';
+import { MAX_DRAW } from '../../engine/game';
 import { type PlayContext, checkPlay, drawAmount } from '../../engine/rules';
 import type { ClientView, HostMsg, Transport } from '../../net/protocol';
 import { go } from '../app';
@@ -16,15 +17,20 @@ type Modal = ReturnType<typeof modal>;
 /** Deterministic scatter so the discard stack doesn't jump around on re-render. */
 const scatter = (id: number) => ({ rot: ((id * 37) % 25) - 12, x: ((id * 13) % 9) - 4, y: ((id * 7) % 7) - 3 });
 
-const hue = (seat: number) => (seat * 67 + 200) % 360;
-
 export class GameScreen {
   readonly el: HTMLElement;
   private view: ClientView | null = null;
   private selected: number[] = [];
   private focus = 0;
   private pending = false;
+  /** Cards just drawn into my hand, highlighted briefly since sorting hides where they landed. */
+  private fresh = new Set<number>();
+  private freshTimer: ReturnType<typeof setTimeout> | undefined;
   private pile: Card[] = [];
+  /** Colour chosen for each wild on the pile (card ids repeat between games, so reset per game). */
+  private painted = new Map<number, Colour>();
+  /** Wild painted by this update, which gets a flip animation. */
+  private justPainted: number | null = null;
 
   private info = h('div', { class: 'top-info' });
   private table = h('div', { class: 'table' });
@@ -49,7 +55,12 @@ export class GameScreen {
   private resultKey = '';
   private countdown: ReturnType<typeof setInterval> | undefined;
   private input: HandInput;
-  private resize = new ResizeObserver(() => this.layoutHand());
+  private resize = new ResizeObserver(() => (this.layoutHand(), this.pointAtActor()));
+  /** Arrow orbiting the pile that points at whoever must act. */
+  private pointer = h('div', { class: 'turn-pointer', 'aria-hidden': 'true' }, h('div', { class: 'tp-arrow' }));
+  private pointerAngle = 90;
+  /** Last turn announced, so "Your turn!" fires once per turn. */
+  private announced = '';
 
   constructor(private transport: Transport) {
     this.handEl.append(this.handRow);
@@ -58,6 +69,7 @@ export class GameScreen {
     this.playBtn.onclick = () => this.send();
     this.table.append(
       this.direction,
+      this.pointer,
       this.seatsLayer,
       h('div', { class: 'centre' }, h('div', { class: 'piles' }, this.drawPile, this.discard), this.status),
       this.banner,
@@ -89,12 +101,14 @@ export class GameScreen {
       },
     });
     this.resize.observe(this.handEl);
+    this.resize.observe(this.table);
   }
 
   destroy() {
     this.input.destroy();
     this.resize.disconnect();
     clearInterval(this.countdown);
+    clearTimeout(this.freshTimer);
     this.colourModal?.close();
     this.swapModal?.close();
     this.resultModal?.close();
@@ -126,21 +140,38 @@ export class GameScreen {
 
     if (events.some((e) => e.type === 'newGame')) {
       this.pile = [];
+      this.painted.clear();
       this.selected = [];
       this.resultModal?.close();
       this.resultModal = null;
     }
-    for (const e of events) if (e.type === 'play') this.pile.push(...e.cards);
+    for (const e of events) {
+      if (e.type === 'play') this.pile.push(...e.cards);
+      if (e.type === 'colour') {
+        const wild = this.pile.findLast(isWild);
+        if (wild) {
+          this.painted.set(wild.id, e.colour);
+          this.justPainted = wild.id;
+        }
+      }
+    }
     if (this.pile.at(-1)?.id !== view.top.id) this.pile = [view.top];
     this.pile = this.pile.slice(-PILE_VISIBLE);
 
-    this.view = view;
+    this.view = { ...view, hand: [...view.hand].sort(compareCards) };
     this.pending = false;
+    const drawn = events.flatMap((e) => (e.type === 'draw' && e.player === view.you ? (e.cards ?? []) : []));
+    if (drawn.length) {
+      this.fresh = new Set(drawn.map((c) => c.id));
+      clearTimeout(this.freshTimer);
+      this.freshTimer = setTimeout(() => this.fresh.clear(), 1600);
+    }
     const inHand = new Set(view.hand.map((c) => c.id));
     this.selected = this.selected.filter((id) => inHand.has(id));
     this.focus = Math.min(this.focus, Math.max(0, view.hand.length - 1));
 
     this.render();
+    this.justPainted = null;
     this.animate(events, sources);
     this.syncModals();
   }
@@ -151,10 +182,38 @@ export class GameScreen {
       h('span', { class: 'pill' }, `Round ${v.round} · Game ${v.gameNumber}`),
       h('span', { class: 'pill subtle' }, `First to ${v.settings.roundScoreLimit} · Bo${v.settings.bestOf}`),
     );
+    this.table.classList.toggle('live', v.matchPhase === 'playing');
     this.renderSeats();
     this.renderPiles();
     this.renderMe();
     this.renderHand();
+    this.pointAtActor();
+    this.announceTurn();
+  }
+
+  private pointAtActor() {
+    const v = this.view;
+    const live = v?.matchPhase === 'playing';
+    this.pointer.classList.toggle('on', live);
+    if (!v || !live) return;
+    const target = this.seatAvatar(this.actor(v))?.getBoundingClientRect();
+    const origin = this.pointer.getBoundingClientRect();
+    if (!target || !this.table.clientWidth) return;
+    const angle = (Math.atan2(target.top + target.height / 2 - origin.top, target.left + target.width / 2 - origin.left) * 180) / Math.PI;
+    // Swing the short way round rather than spinning back through 360°.
+    this.pointerAngle += ((((angle - this.pointerAngle) % 360) + 540) % 360) - 180;
+    this.pointer.style.rotate = `${this.pointerAngle}deg`;
+    this.pointer.classList.toggle('mine', this.actor(v) === v.you);
+  }
+
+  private announceTurn() {
+    const v = this.view!;
+    if (!this.myTurn) return;
+    const key = `${v.round}-${v.gameNumber}-${v.turn}`;
+    if (key === this.announced) return;
+    this.announced = key;
+    this.flashBanner('Your turn!', 'mine');
+    navigator.vibrate?.(40);
   }
 
   private get myTurn() {
@@ -165,7 +224,7 @@ export class GameScreen {
   /** Draw button: take a stack, or draw-until-playable once per turn. */
   private get canDraw() {
     const v = this.view!;
-    return this.myTurn && (v.stack !== null || !v.hasDrawn);
+    return this.myTurn && (v.stack !== null || v.drawnThisTurn < MAX_DRAW);
   }
 
   private playContext(isTurn: boolean): PlayContext {
@@ -219,8 +278,9 @@ export class GameScreen {
   private avatar(seat: number, timed: boolean) {
     const v = this.view!;
     const info = v.seats[seat];
-    const av = h('div', { class: 'avatar' }, info.cpu ? '🤖' : info.connected ? info.name[0]?.toUpperCase() : '📴');
-    av.style.setProperty('--hue', String(hue(seat)));
+    // A dropped player's seat (covered by a CPU) shows as disconnected.
+    const av = h('div', { class: 'avatar' }, info.connected ? info.avatar.emoji : '📴');
+    av.style.background = info.avatar.colour;
     if (timed && v.turnMsLeft !== null) {
       const total = v.settings.turnTimer * 1000;
       const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -248,7 +308,7 @@ export class GameScreen {
     this.discard.replaceChildren(
       ...this.pile.map((c, i) => {
         const s = scatter(c.id);
-        const el = cardEl(c, i === this.pile.length - 1 ? 'top' : '');
+        const el = cardEl(c, `${i === this.pile.length - 1 ? 'top' : ''} ${c.id === this.justPainted ? 'paint-flip' : ''}`, this.paintFor(c));
         el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.rot}deg)`;
         return el;
       }),
@@ -262,12 +322,21 @@ export class GameScreen {
     else if (v.gamePhase === 'chooseColour') text = actor === v.you ? 'Pick a colour' : `${name} is picking a colour…`;
     else if (v.gamePhase === 'chooseSwap') text = actor === v.you ? 'Pick a hand to swap with' : `${name} is choosing a hand to swap…`;
     else if (v.stack) text = actor === v.you ? `Stack a ${v.stack.kind === 'draw2' ? 'Draw 2' : 'Draw 4'} or take +${v.stack.count}` : `${name} faces +${v.stack.count}`;
-    else if (actor === v.you) text = v.hasDrawn ? 'Play a card' : 'Your turn';
+    else if (actor === v.you) text = v.drawnThisTurn > 0 ? `Play, or keep drawing (${MAX_DRAW - v.drawnThisTurn} left)` : 'Your turn';
     else text = `${name}'s turn`;
     this.status.textContent = text;
     this.direction.textContent = v.direction === 1 ? '↻' : '↺';
     this.direction.classList.toggle('ccw', v.direction === -1);
     this.status.className = `status ${actor === v.you ? 'mine' : ''}`;
+  }
+
+  /** A wild shows its chosen colour once picked (falls back to the live colour, e.g. after a rejoin). */
+  private paintFor(c: Card): Colour | undefined {
+    const v = this.view!;
+    if (!isWild(c)) return undefined;
+    const known = this.painted.get(c.id);
+    if (known) return known;
+    return c.id === v.top.id && v.gamePhase !== 'chooseColour' ? v.colour : undefined;
   }
 
   private renderMe() {
@@ -294,7 +363,7 @@ export class GameScreen {
       });
     }
     this.drawBtn.disabled = !this.canDraw;
-    this.drawBtn.textContent = this.myTurn && v.stack ? `Take +${v.stack.count}` : 'Draw';
+    this.drawBtn.textContent = this.myTurn && v.stack ? `Take +${v.stack.count}` : this.myTurn && v.drawnThisTurn > 0 ? `Draw (${MAX_DRAW - v.drawnThisTurn})` : 'Draw';
     this.el.classList.toggle('my-turn', isActor);
   }
 
@@ -306,7 +375,7 @@ export class GameScreen {
     this.handRow.replaceChildren(
       ...v.hand.map((c, i) => {
         const order = this.selected.indexOf(c.id);
-        const el = cardEl(c, `${order >= 0 ? 'selected' : ''} ${i === this.focus ? 'focused' : ''} ${this.canJumpIn(c) ? 'jumpable' : ''}`);
+        const el = cardEl(c, `${order >= 0 ? 'selected' : ''} ${i === this.focus ? 'focused' : ''} ${this.canJumpIn(c) ? 'jumpable' : ''} ${this.fresh.has(c.id) ? 'fresh' : ''}`);
         if (order >= 0) el.append(h('span', { class: 'sel-badge' }, String(order + 1)));
         return el;
       }),

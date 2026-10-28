@@ -3,6 +3,7 @@ import type { PeerHost } from '../../net/PeerHost';
 import type { LobbyInfo } from '../../net/protocol';
 import { go } from '../app';
 import { h, modal, toast } from '../dom';
+import { CPU_EMOJI, avatarEl } from '../profile';
 
 function shareLink(code: string) {
   return `${location.origin}${location.pathname}?code=${code}`;
@@ -39,13 +40,13 @@ function playerList(lobby: LobbyInfo) {
     h(
       'li',
       { class: `lobby-player ${i === lobby.you ? 'me' : ''}` },
-      h('span', { class: 'avatar-sm' }, p.name[0]?.toUpperCase() ?? '?'),
+      avatarEl(p.avatar, 'small'),
       h('span', { class: 'lp-name' }, p.name, i === lobby.you ? ' (you)' : ''),
       h('span', { class: `lp-status ${p.ready ? 'ready' : ''}` }, p.host ? 'Host' : p.ready ? 'Ready ✓' : 'Not ready'),
     ),
   );
   for (let i = lobby.players.length; i < lobby.settings.playerCount; i++) {
-    rows.push(h('li', { class: 'lobby-player cpu' }, h('span', { class: 'avatar-sm' }, '🤖'), h('span', { class: 'lp-name' }, 'Open seat (CPU)'), h('span', { class: 'lp-status' }, '')));
+    rows.push(h('li', { class: 'lobby-player cpu' }, avatarEl({ emoji: CPU_EMOJI, colour: 'transparent' }, 'small'), h('span', { class: 'lp-name' }, 'Open seat (CPU)'), h('span', { class: 'lp-status' }, '')));
   }
   return h('ul', { class: 'lobby-list' }, ...rows);
 }

@@ -91,30 +91,47 @@ describe('turn flow', () => {
 });
 
 describe('drawing', () => {
-  it('draws until a playable card appears, then the player must play', () => {
+  it('draws one card per draw and the player can keep drawing', () => {
     const playable = num('red', 9);
     const s = makeGame({
       hands: [[num('blue', 1)], [num('red', 1)]],
       top: num('red', 3),
-      drawPile: [playable, num('blue', 2), num('yellow', 4)], // pops from the end
+      drawPile: [num('yellow', 4), playable, num('blue', 2)], // pops from the end
     });
-    const { state, events } = apply(s, { type: 'draw', player: 0 });
-    expect(state.hands[0]).toHaveLength(4);
+    let { state, events } = apply(s, { type: 'draw', player: 0 });
+    expect(state.hands[0]).toHaveLength(2);
     expect(state.current).toBe(0);
-    expect(state.hasDrawn).toBe(true);
-    expect(events).toContainEqual(expect.objectContaining({ type: 'draw', count: 3 }));
-    expect(reduceGame(state, { type: 'draw', player: 0 }).ok).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'draw', count: 1 }));
+    ({ state } = apply(state, { type: 'draw', player: 0 }));
+    expect(state.drawnThisTurn).toBe(2);
+    // Holding a playable card doesn't stop more draws.
+    ({ state } = apply(state, { type: 'draw', player: 0 }));
+    expect(state.hands[0]).toHaveLength(4);
+    ({ state } = apply(state, { type: 'play', player: 0, cardIds: [playable.id] }));
+    expect(state.current).toBe(1);
+    expect(state.drawnThisTurn).toBe(0);
   });
 
-  it(`stops after ${MAX_DRAW} cards and passes if none were playable`, () => {
-    const s = makeGame({
+  it(`passes after ${MAX_DRAW} draws if nothing is playable`, () => {
+    let state = makeGame({
       hands: [[num('blue', 1)], [num('red', 1)]],
       top: num('red', 3),
       drawPile: Array.from({ length: 15 }, () => num('blue', 5)),
     });
-    const { state } = apply(s, { type: 'draw', player: 0 });
+    for (let i = 0; i < MAX_DRAW; i++) state = apply(state, { type: 'draw', player: 0 }).state;
     expect(state.hands[0]).toHaveLength(1 + MAX_DRAW);
     expect(state.current).toBe(1);
+  });
+
+  it(`after ${MAX_DRAW} draws with a playable card, the player must play`, () => {
+    let state = makeGame({
+      hands: [[num('red', 1), num('blue', 2)], [num('red', 1)]],
+      top: num('red', 3),
+      drawPile: Array.from({ length: 15 }, () => num('blue', 5)),
+    });
+    for (let i = 0; i < MAX_DRAW; i++) state = apply(state, { type: 'draw', player: 0 }).state;
+    expect(state.current).toBe(0);
+    expect(reduceGame(state, { type: 'draw', player: 0 }).ok).toBe(false);
   });
 
   it('reshuffles the discard pile when the draw pile runs out', () => {

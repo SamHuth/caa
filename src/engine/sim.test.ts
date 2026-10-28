@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DECK_SIZE } from './cards';
 import { cpuColour, cpuJumpIn, cpuMove, cpuSwapTarget } from './cpu';
-import { nextPlayer, pileOf, stackOf } from './game';
+import { MAX_DRAW, nextPlayer, pileOf, stackOf } from './game';
 import { type Difficulty, DEFAULT_SETTINGS, type MatchState, newMatch, reduceMatch } from './match';
 import { rand } from './rng';
 
@@ -65,7 +65,7 @@ function simulate(seed: number, players: number, difficulty: Difficulty) {
       pile: pileOf(g),
       stack: stackOf(g),
       difficulty,
-      hasDrawn: g.hasDrawn,
+      canDraw: g.drawnThisTurn < MAX_DRAW,
       nextHandCount: g.hands[nextPlayer(g)].length,
       minOtherHandCount: Math.min(...g.hands.filter((_, i) => i !== p).map((h) => h.length)),
       rand: rnd,

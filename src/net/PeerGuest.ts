@@ -1,6 +1,7 @@
 import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import { CONNECT_TIMEOUT_MS, PEER_TIMEOUT_MS, createPeer, peerIdFor, playerToken } from './peer';
+import type { Profile } from '../ui/profile';
 import type { ClientAction, GuestMsg, HostMsg, Transport } from './protocol';
 
 /** A connection from this browser to a host's room. */
@@ -25,7 +26,7 @@ export class PeerGuest implements Transport {
   }
 
   /** Resolves once the host has answered with a lobby or game state. */
-  static join(code: string, name: string): Promise<PeerGuest> {
+  static join(code: string, me: Profile): Promise<PeerGuest> {
     return new Promise((resolve, reject) => {
       const peer = createPeer();
       let settled = false;
@@ -45,7 +46,7 @@ export class PeerGuest implements Transport {
       });
       peer.once('open', () => {
         const conn = peer.connect(peerIdFor(code), { reliable: true, serialization: 'json' });
-        conn.once('open', () => conn.send({ t: 'join', name, token: playerToken() } satisfies GuestMsg));
+        conn.once('open', () => conn.send({ t: 'join', name: me.name, avatar: me.avatar, token: playerToken() } satisfies GuestMsg));
         conn.once('data', (data) => {
           const msg = data as HostMsg;
           if (msg.t === 'closed') return fail(msg.reason);

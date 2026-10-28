@@ -213,7 +213,8 @@ h3 {
 /* home */
 
 .home {
-  justify-content: center;
+  /* safe: don't clip the top when the profile panel makes it taller than the screen */
+  justify-content: safe center;
 }
 
 .logo {
@@ -388,14 +389,123 @@ h3 {
   color: #5be38f;
 }
 
-.avatar-sm {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: grid;
+.avatar-badge {
+  display: inline-grid;
   place-items: center;
-  background: var(--bg-2);
-  font-weight: 600;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 1.4rem;
+  line-height: 1;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.avatar-badge.small {
+  width: 34px;
+  height: 34px;
+  font-size: 1.15rem;
+}
+
+.avatar-badge.big {
+  width: 84px;
+  height: 84px;
+  font-size: 2.9rem;
+  border-width: 3px;
+}
+
+/* profile (home) */
+
+.profile {
+  gap: 14px;
+}
+
+.profile-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-preview .avatar-badge {
+  transition: background 0.2s;
+}
+
+.name-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.name-row .input {
+  min-width: 0;
+}
+
+.dice {
+  width: 48px;
+  height: 48px;
+  font-size: 1.4rem;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.emoji-btn {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: clamp(1.1rem, 5.5vw, 1.5rem);
+  line-height: 1;
+  padding: 0;
+  transition: transform 0.12s, background 0.2s;
+}
+
+.emoji-btn.active {
+  box-shadow: 0 0 0 2px #fff;
+  transform: scale(1.1);
+}
+
+.swatches {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+}
+
+.swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+  transform: scale(1.12);
+}
+
+.logo.small .logo-cards {
+  height: 62px;
+  margin-bottom: 4px;
+}
+
+.logo.small .lc {
+  width: 36px;
+  height: 52px;
+  margin-left: -18px;
+  border-width: 2px;
+  border-radius: 7px;
+}
+
+.logo.small h1 {
+  font-size: clamp(1.7rem, 7.5vw, 2.4rem);
 }
 
 /* ------------------------------------------------------------- cards */
@@ -442,6 +552,24 @@ h3 {
   background: rgba(255, 255, 255, 0.95);
   display: grid;
   place-items: center;
+}
+
+/* A wild wearing its chosen colour keeps a rainbow ring so you can tell it was a wild. */
+.card.painted .pip {
+  border: calc(var(--cw) * 0.05) solid transparent;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    conic-gradient(var(--red) 0 25%, var(--yellow) 0 50%, var(--green) 0 75%, var(--blue) 0) border-box;
+}
+
+.card.paint-flip {
+  animation: paint-flip 0.5s ease-out;
+}
+
+@keyframes paint-flip {
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; filter: brightness(1.6); }
+  100% { rotate: y 0deg; }
 }
 
 .card .face {
@@ -581,7 +709,7 @@ h3 {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  width: 84px;
+  width: 104px;
   text-align: center;
 }
 
@@ -590,25 +718,106 @@ h3 {
 }
 
 .avatar {
-  --hue: 260;
   position: relative;
   width: 48px;
   height: 48px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 1.3rem;
-  background: hsl(var(--hue) 65% 55%);
+  font-size: 1.6rem;
+  line-height: 1;
   border: 3px solid rgba(255, 255, 255, 0.85);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
   transition: transform 0.2s;
 }
 
+.seat {
+  transition: opacity 0.3s;
+}
+
+/* Everyone but the player who must act fades back. */
+.table.live .seat:not(.active) {
+  opacity: 0.55;
+}
+
+.seat.active {
+  z-index: 2;
+}
+
 .seat.active .avatar {
-  transform: scale(1.12);
+  transform: scale(1.22);
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px rgba(255, 204, 51, 0.3), 0 3px 10px rgba(0, 0, 0, 0.35);
+  animation: turn-glow 1s ease-in-out infinite alternate;
+}
+
+@keyframes turn-glow {
+  from { box-shadow: 0 0 0 3px rgba(255, 204, 51, 0.9), 0 0 8px rgba(255, 204, 51, 0.6); }
+  to { box-shadow: 0 0 0 7px rgba(255, 204, 51, 0.35), 0 0 28px rgba(255, 204, 51, 0.9); }
+}
+
+.seat.active .seat-name {
+  margin-top: 6px;
+  background: var(--accent);
+  color: #2a1a00;
+  border-radius: 999px;
+  padding: 0 8px;
+  text-shadow: none;
+}
+
+.turn-pointer {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 0;
+  height: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    rotate 0.5s cubic-bezier(0.3, 1.35, 0.5, 1),
+    opacity 0.3s;
+}
+
+.turn-pointer.on {
+  opacity: 1;
+}
+
+.tp-arrow {
+  position: absolute;
+  left: calc(var(--cw) * 1.75);
+  top: -14px;
+  width: 0;
+  height: 0;
+  border-top: 14px solid transparent;
+  border-bottom: 14px solid transparent;
+  border-left: 22px solid var(--accent);
+  filter: drop-shadow(0 0 6px rgba(255, 204, 51, 0.8));
+  animation: nudge 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes nudge {
+  to { translate: 8px 0; }
+}
+
+/* Your turn: light up your side of the table. */
+.player-area {
+  border-radius: 24px 24px 0 0;
+  transition:
+    box-shadow 0.3s,
+    background 0.3s;
+}
+
+.my-turn .player-area {
+  background: linear-gradient(to top, rgba(255, 204, 51, 0.16), rgba(255, 204, 51, 0.04));
+  box-shadow: 0 -2px 0 var(--accent), 0 -14px 30px -12px rgba(255, 204, 51, 0.7);
+}
+
+.my-turn .me-bar .avatar {
+  animation: turn-glow 1s ease-in-out infinite alternate;
+}
+
+.my-turn .status.mine {
+  animation: pulse 0.7s ease-in-out infinite alternate;
 }
 
 .ring {
@@ -865,6 +1074,13 @@ h3 {
   font-size: 1.25rem;
 }
 
+.banner-msg.mine {
+  background: var(--accent);
+  color: #2a1a00;
+  font-size: 1.5rem;
+  padding: 8px 22px;
+}
+
 .banner-msg.bad {
   background: var(--danger);
 }
@@ -928,7 +1144,7 @@ h3 {
 .me-bar .avatar {
   width: 38px;
   height: 38px;
-  font-size: 1rem;
+  font-size: 1.3rem;
 }
 
 .me-info .seat-meta {
@@ -988,6 +1204,15 @@ h3 {
 
 .hand-row .card.jumpable:not(.selected) {
   box-shadow: 0 0 0 2px #fff, 0 0 14px rgba(255, 255, 255, 0.8);
+}
+
+.hand-row .card.fresh:not(.selected) {
+  animation: fresh 1.6s ease-out;
+}
+
+@keyframes fresh {
+  0%, 60% { box-shadow: 0 0 0 3px #fff, 0 0 18px rgba(255, 255, 255, 0.9); translate: 0 -10px; }
+  100% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); translate: 0 0; }
 }
 
 .hand-row .card.sending {

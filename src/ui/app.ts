@@ -6,17 +6,11 @@ import { PeerHost } from '../net/PeerHost';
 import type { HostMsg, LobbyInfo, Transport } from '../net/protocol';
 import { holdWakeLock, showScreen, store } from './dom';
 import { GameScreen } from './game/GameScreen';
-import { cpuNames } from './names';
+import { cpuSeats, profile } from './profile';
 import { homeScreen } from './screens/home';
 import { guestLobbyScreen, hostLobbyScreen } from './screens/lobby';
 import { multiplayerScreen } from './screens/multiplayer';
 import { settingsScreen } from './screens/settings';
-
-export const playerName = {
-  get: () => store.get('name', ''),
-  set: (name: string) => store.set('name', name.trim().slice(0, 16)),
-  display: () => store.get('name', '').trim() || 'You',
-};
 
 export const savedSettings = {
   get: (): Settings => {
@@ -45,9 +39,10 @@ export const go = {
   },
 
   singlePlayer(settings: Settings) {
+    const me = profile.get();
     const seats = [
-      { name: playerName.display(), cpu: false, connected: true },
-      ...cpuNames(settings.playerCount - 1).map((name) => ({ name, cpu: true, connected: true })),
+      { ...me, cpu: false, connected: true },
+      ...cpuSeats(settings.playerCount - 1, [me.name]),
     ];
     const session = new HostSession(seats, settings);
     const transport = new LocalTransport(session, 0);

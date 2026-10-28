@@ -6,7 +6,7 @@ export function showHowToPlay() {
   modal(
     [
       h('h2', {}, 'How to play'),
-      h('p', {}, 'Get rid of all your cards before everyone else, and beat Angali. Play cards onto the centre pile that match it. If you can’t (or won’t), draw until you can.'),
+      h('p', {}, 'Get rid of all your cards before everyone else, and beat Angali. Play cards onto the centre pile that match it, or draw if you can’t.'),
       h('h3', {}, 'The deck'),
       h(
         'ul',
@@ -36,7 +36,7 @@ export function showHowToPlay() {
           ' The last card you play becomes the new top card.',
         ),
         li('You ', b('can’t go out'), ' on a Skip, Reverse, Draw 2, Wild or Draw 4, but you can go out on a double or sum.'),
-        li('Can’t play? Draw until you get a playable card, up to ', b('10 cards'), '. If none of them play, your turn passes.'),
+        li('Can’t (or won’t) play? Draw one card at a time, and play whenever you like. After ', b('10 draws'), ', if nothing in your hand plays, your turn passes.'),
         li('Run out of time and you ', b('draw 2'), ' and your turn passes.'),
       ),
       h('h3', {}, 'Stacking'),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DECK_SIZE, buildDeck, cardPoints } from './cards';
+import { DECK_SIZE, buildDeck, cardPoints, compareCards } from './cards';
 import { validateJumpIn, validatePlay } from './rules';
 import { draw2, draw4, num, skip, wild } from './testUtils';
 
@@ -15,6 +15,12 @@ describe('deck', () => {
     expect(deck.filter((c) => c.kind === 'draw4')).toHaveLength(4);
     expect(deck.filter((c) => c.kind === 'reverse')).toHaveLength(8);
     expect(deck.filter((c) => c.colour === 'red' && c.value === 12)).toHaveLength(2);
+  });
+
+  it('sorts a hand by colour, then numbers, then actions, wilds last', () => {
+    const hand = [wild(), num('blue', 3), skip('red'), num('red', 9), num('red', 2), draw4(), draw2('red')];
+    const labels = [...hand].sort(compareCards).map((c) => `${c.colour ?? '*'}-${c.kind}-${c.value ?? ''}`);
+    expect(labels).toEqual(['red-number-2', 'red-number-9', 'red-skip-', 'red-draw2-', 'blue-number-3', '*-wild-', '*-draw4-']);
   });
 
   it('scores cards', () => {
