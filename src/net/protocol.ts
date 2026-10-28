@@ -2,6 +2,21 @@ import type { Colour } from '../engine/cards';
 import type { MatchEvent, Settings } from '../engine/match';
 import type { PlayerView } from '../engine/view';
 
+/** Emoji reactions anyone at the table can send; they float up from the sender's avatar. */
+export const REACTIONS = {
+  lol: '😂',
+  cheeky: '😜',
+  angry: '😡',
+  sad: '😢',
+  skull: '💀',
+  beer: '🍺',
+  golf: '🏌️',
+} as const;
+
+export type ReactionKey = keyof typeof REACTIONS;
+
+export const isReaction = (key: unknown): key is ReactionKey => typeof key === 'string' && Object.hasOwn(REACTIONS, key);
+
 /** Actions a player's client can request (the seat is implied by the connection). */
 export type ClientAction =
   | { type: 'play'; cardIds: number[] }
@@ -51,6 +66,7 @@ export type HostMsg =
   | { t: 'lobby'; lobby: LobbyInfo }
   | { t: 'state'; view: ClientView; events: MatchEvent[] }
   | { t: 'reject'; reason: string }
+  | { t: 'react'; seat: number; react: ReactionKey }
   | { t: 'ping'; ts: number }
   | { t: 'closed'; reason: string };
 
@@ -58,12 +74,14 @@ export type GuestMsg =
   | { t: 'join'; name: string; avatar: Avatar; token: string }
   | { t: 'ready'; ready: boolean }
   | { t: 'action'; action: ClientAction }
+  | { t: 'react'; react: ReactionKey }
   | { t: 'pong'; ts: number }
   | { t: 'leave' };
 
 /** What the game screen talks to: an in-page HostSession or a WebRTC link to the host. */
 export interface Transport {
   send(action: ClientAction): void;
+  react(key: ReactionKey): void;
   onMessage(fn: (msg: HostMsg) => void): void;
   leave(): void;
   /** Only available to the host. */

@@ -2,7 +2,7 @@ import { type Card, COLOURS, type Colour, compareCards, isWild, sameFace } from 
 import type { MatchEvent } from '../../engine/match';
 import { MAX_DRAW } from '../../engine/game';
 import { type PlayContext, checkPlay, drawAmount } from '../../engine/rules';
-import type { ClientView, HostMsg, Transport } from '../../net/protocol';
+import { type ClientView, type HostMsg, REACTIONS, type ReactionKey, type Transport } from '../../net/protocol';
 import { go } from '../app';
 import { cardBack, cardEl } from '../cardEl';
 import { h, modal, toast } from '../dom';
@@ -45,6 +45,9 @@ export class GameScreen {
   private handRow = h('div', { class: 'hand-row' });
   private drawBtn = h('button', { class: 'btn btn-small btn-ghost' }, 'Draw');
   private playBtn = h('button', { class: 'btn btn-small btn-primary' }, 'Play');
+  private reactBtn = h('button', { class: 'btn-round react-btn', 'aria-label': 'Send a reaction', 'aria-expanded': 'false' }, '😀');
+  private reactTray = h('div', { class: 'react-tray', role: 'menu', 'aria-label': 'Reactions' });
+  private lastSentReact = 0;
 
   private colourModal: Modal | null = null;
   private swapModal: Modal | null = null;
@@ -67,6 +70,12 @@ export class GameScreen {
     this.drawPile.onclick = () => this.draw();
     this.drawBtn.onclick = () => this.draw();
     this.playBtn.onclick = () => this.send();
+    this.reactBtn.onclick = () => this.toggleTray();
+    this.reactTray.append(
+      ...(Object.keys(REACTIONS) as ReactionKey[]).map((key) =>
+        h('button', { class: 'react-opt', role: 'menuitem', 'aria-label': key, title: key, onclick: () => this.sendReact(key) }, REACTIONS[key]),
+      ),
+    );
     this.table.append(
       this.direction,
       this.pointer,
@@ -83,6 +92,9 @@ export class GameScreen {
         'section',
         { class: 'player-area' },
         this.timerBar,
+        // Floats above your avatar; the tray stays open until toggled closed so reactions can be spammed.
+        this.reactBtn,
+        this.reactTray,
         h('div', { class: 'me-row' }, this.me, h('div', { class: 'actions' }, this.drawBtn, this.playBtn)),
         this.handEl,
         h('p', { class: 'hand-hint' }, 'Tap cards in order · swipe up to play'),
@@ -120,6 +132,8 @@ export class GameScreen {
         return this.update(msg.view, msg.events);
       case 'reject':
         return this.reject(msg.reason);
+      case 'react':
+        return this.floatReaction(msg.seat, REACTIONS[msg.react]);
       case 'closed':
         return this.showClosed(msg.reason);
     }
@@ -281,6 +295,7 @@ export class GameScreen {
     // A dropped player's seat (covered by a CPU) shows as disconnected.
     const av = h('div', { class: 'avatar' }, info.connected ? info.avatar.emoji : '📴');
     av.style.background = info.avatar.colour;
+    if (info.cpu) av.append(h('span', { class: 'cpu-tag', title: 'CPU' }, '🤖'));
     if (timed && v.turnMsLeft !== null) {
       const total = v.settings.turnTimer * 1000;
       const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -555,6 +570,41 @@ export class GameScreen {
     }
   }
 
+  // ---------------------------------------------------------------- reactions
+
+  private toggleTray(open = !this.reactTray.classList.contains('open')) {
+    this.reactTray.classList.toggle('open', open);
+    this.reactBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  private sendReact(key: ReactionKey) {
+    const now = Date.now();
+    if (now - this.lastSentReact < 150) return; // the host enforces this too
+    this.lastSentReact = now;
+    this.transport.react(key);
+  }
+
+  /** Emoji rises and fades from a player's avatar. */
+  private floatReaction(seat: number, emoji: string) {
+    // Your own rise from above the react button so they don't bury it.
+    const origin = seat === this.view?.you ? this.reactBtn : this.seatAvatar(seat);
+    const from = origin?.getBoundingClientRect();
+    if (!from) return;
+    const el = h('span', { class: 'reaction', 'aria-hidden': 'true' }, emoji);
+    Object.assign(el.style, { left: `${from.left + from.width / 2}px`, top: `${from.top}px` });
+    document.body.append(el);
+    const drift = (Math.random() - 0.5) * 40;
+    el.animate(
+      [
+        { translate: '-50% 0', scale: '0.4', opacity: 0 },
+        { translate: '-50% -24px', scale: '1.25', opacity: 1, offset: 0.15 },
+        { translate: `calc(-50% + ${drift / 2}px) -60px`, scale: '1', opacity: 1, offset: 0.55 },
+        { translate: `calc(-50% + ${drift}px) -110px`, scale: '0.9', opacity: 0 },
+      ],
+      { duration: 1800, easing: 'ease-out', fill: 'forwards' },
+    ).finished.finally(() => el.remove());
+  }
+
   private flashBanner(text: string, kind = '') {
     const b = h('div', { class: `banner-msg ${kind}` }, text);
     this.banner.append(b);
@@ -628,13 +678,17 @@ export class GameScreen {
     );
   }
 
+  /** Ranked by rounds won, then score, then lowest hand value left in the last game. */
   private scoreboard() {
     const v = this.view!;
-    const order = v.seats.map((_, i) => i).sort((a, b) => v.roundWins[b] - v.roundWins[a] || v.scores[b] - v.scores[a]);
+    const hand = (i: number) => v.lastResult?.leftover[i] ?? 0;
+    const order = v.seats
+      .map((_, i) => i)
+      .sort((a, b) => v.roundWins[b] - v.roundWins[a] || v.scores[b] - v.scores[a] || hand(a) - hand(b));
     return h(
       'table',
       { class: 'scoreboard' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'Player'), h('th', {}, 'Left in hand'), h('th', {}, 'Score'), h('th', {}, 'Rounds'))),
+      h('thead', {}, h('tr', {}, h('th', {}, 'Player'), h('th', {}, 'Rounds'), h('th', {}, 'Score'), h('th', {}, 'Hand value'))),
       h(
         'tbody',
         {},
@@ -643,9 +697,9 @@ export class GameScreen {
             'tr',
             { class: i === v.you ? 'me' : '' },
             h('td', {}, v.seats[i].name),
-            h('td', {}, String(v.lastResult?.leftover[i] ?? 0)),
-            h('td', {}, `${v.scores[i]} / ${v.settings.roundScoreLimit}`),
             h('td', {}, '★'.repeat(v.roundWins[i]) || '–'),
+            h('td', {}, `${v.scores[i]} / ${v.settings.roundScoreLimit}`),
+            h('td', {}, String(hand(i))),
           ),
         ),
       ),

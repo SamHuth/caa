@@ -80,7 +80,10 @@ export class PeerHost {
     const seats: SeatInfo[] = [
       { ...this.host, cpu: false, connected: true },
       ...players.map((g) => ({ name: g.name, avatar: g.avatar, cpu: false, connected: true })),
-      ...cpuSeats(this.settings.playerCount - players.length - 1, [this.host.name, ...players.map((g) => g.name)]),
+      ...cpuSeats(this.settings.playerCount - players.length - 1, {
+        names: [this.host.name, ...players.map((g) => g.name)],
+        emojis: [this.host.avatar.emoji, ...players.map((g) => g.avatar.emoji)],
+      }),
     ];
     players.forEach((g, i) => (g.seat = i + 1));
     this.session = new HostSession(seats, this.settings);
@@ -116,6 +119,9 @@ export class PeerHost {
         break;
       case 'action':
         if (this.session && g.seat !== null) this.session.submit(g.seat, msg.action);
+        break;
+      case 'react':
+        if (this.session && g.seat !== null) this.session.react(g.seat, msg.react);
         break;
       case 'pong':
         g.rtt = Date.now() - msg.ts;

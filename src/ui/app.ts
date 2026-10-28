@@ -42,7 +42,7 @@ export const go = {
     const me = profile.get();
     const seats = [
       { ...me, cpu: false, connected: true },
-      ...cpuSeats(settings.playerCount - 1, [me.name]),
+      ...cpuSeats(settings.playerCount - 1, { names: [me.name], emojis: [me.avatar.emoji] }),
     ];
     const session = new HostSession(seats, settings);
     const transport = new LocalTransport(session, 0);

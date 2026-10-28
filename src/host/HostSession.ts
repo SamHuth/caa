@@ -3,12 +3,16 @@ import { MAX_DRAW, nextPlayer, pileOf, stackOf, topCard } from '../engine/game';
 import { type MatchAction, type MatchEvent, type MatchState, type Settings, newMatch, reduceMatch } from '../engine/match';
 import { randomSeed } from '../engine/rng';
 import { redact, redactEvents } from '../engine/view';
-import type { ClientAction, ClientView, HostMsg, SeatInfo, Transport } from '../net/protocol';
+import { type ClientAction, type ClientView, type HostMsg, type ReactionKey, type SeatInfo, type Transport, isReaction } from '../net/protocol';
 
 type Listener = (msg: HostMsg) => void;
 type Timer = ReturnType<typeof setTimeout>;
 
 const NEXT_GAME_MS = 6000;
+/** Minimum gap between one seat's reactions. */
+const REACT_COOLDOWN_MS = 150;
+/** How often a CPU reacts when something happens to it. */
+const CPU_REACT_CHANCE = 0.45;
 const NEXT_ROUND_MS = 8000;
 
 /**
@@ -26,6 +30,9 @@ export class HostSession {
   private plannedTop = -1;
   private turnDeadline: number | null = null;
   private nextGameAt: number | null = null;
+  /** CPU reaction timers: independent of game timers so state changes don't cancel them. */
+  private reactTimers = new Set<Timer>();
+  private lastReact = new Map<number, number>();
   /** Extra delay on out-of-turn plays per seat, to offset the host's zero latency. */
   readonly jumpDelay = new Map<number, number>();
 
@@ -66,9 +73,20 @@ export class HostSession {
     else this.apply(seat, { ...action, player: seat });
   }
 
+  /** Broadcast an emoji reaction from a seat (rate-limited per seat). */
+  react(seat: number, key: ReactionKey) {
+    if (!isReaction(key) || !this.seats[seat]) return;
+    const now = Date.now();
+    if (now - (this.lastReact.get(seat) ?? 0) < REACT_COOLDOWN_MS) return;
+    this.lastReact.set(seat, now);
+    for (const fn of this.listeners.values()) fn({ t: 'react', seat, react: key });
+  }
+
   dispose() {
     this.clearTimers();
     this.clearJumpTimers();
+    this.reactTimers.forEach(clearTimeout);
+    this.reactTimers.clear();
     this.listeners.clear();
   }
 
@@ -90,6 +108,7 @@ export class HostSession {
 
   private afterChange(events: MatchEvent[]) {
     this.clearTimers();
+    this.cpuReactions(events);
     if (events.some((e) => e.type === 'newGame')) {
       // Card ids repeat between games, so forget the previous jump-in plans.
       this.clearJumpTimers();
@@ -97,6 +116,48 @@ export class HostSession {
     }
     this.schedule();
     for (const [seat, fn] of this.listeners) fn(this.stateMsg(seat, events));
+  }
+
+  /** CPUs sometimes react when something happens to them. */
+  private cpuReactions(events: MatchEvent[]) {
+    const pick = <T>(list: T[]) => list[Math.floor(Math.random() * list.length)];
+    const reactions: [number, ReactionKey[]][] = [];
+    for (const e of events) {
+      switch (e.type) {
+        case 'draw':
+          if (e.reason === 'penalty' || e.reason === 'smiley') reactions.push([e.player, ['angry', 'sad', 'skull']]);
+          break;
+        case 'skip':
+          reactions.push([e.player, ['angry', 'sad']]);
+          break;
+        case 'swap':
+          if (e.target !== null) {
+            reactions.push([e.target, ['angry', 'skull', 'sad']]);
+            reactions.push([e.player, ['cheeky', 'lol']]);
+          }
+          break;
+        case 'play':
+          if (e.jumpIn) reactions.push([e.player, ['cheeky', 'lol']]);
+          break;
+        case 'stack':
+          if (e.total > 4) reactions.push([e.player, ['cheeky', 'lol']]);
+          break;
+        case 'gameOver': {
+          reactions.push([e.result.winner, ['lol', 'beer', 'golf']]);
+          const losers = this.seats.map((_, i) => i).filter((i) => i !== e.result.winner && this.seats[i].cpu);
+          if (losers.length) reactions.push([pick(losers), ['sad', 'skull']]);
+          break;
+        }
+      }
+    }
+    for (const [seat, options] of reactions) {
+      if (!this.seats[seat]?.cpu || Math.random() > CPU_REACT_CHANCE) continue;
+      const timer = setTimeout(() => {
+        this.reactTimers.delete(timer);
+        this.react(seat, pick(options));
+      }, 400 + Math.random() * 900);
+      this.reactTimers.add(timer);
+    }
   }
 
   private stateMsg(seat: number, events: MatchEvent[]): HostMsg {
@@ -206,6 +267,10 @@ export class LocalTransport implements Transport {
 
   send(action: ClientAction) {
     this.session.submit(this.seat, action);
+  }
+
+  react(key: ReactionKey) {
+    this.session.react(this.seat, key);
   }
 
   onMessage(fn: (msg: HostMsg) => void) {

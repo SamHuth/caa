@@ -34,15 +34,20 @@ export function randomAvatar(): Avatar {
   return { emoji: pick(AVATAR_EMOJIS), colour: pick(AVATAR_COLOURS) };
 }
 
-/** CPU seats get "{Adjective} {Animal}" names too, unique at the table. */
-export function cpuSeats(count: number, takenNames: string[] = []): SeatInfo[] {
-  const taken = new Set(takenNames);
+/**
+ * CPU seats get "{Adjective} {Animal}" names and avatar emoji like players do,
+ * avoiding names and emoji already at the table.
+ */
+export function cpuSeats(count: number, taken: { names: string[]; emojis: string[] } = { names: [], emojis: [] }): SeatInfo[] {
+  const names = new Set(taken.names);
+  const freeEmojis = AVATAR_EMOJIS.filter((e) => !taken.emojis.includes(e)).sort(() => Math.random() - 0.5);
   const seats: SeatInfo[] = [];
   while (seats.length < count) {
     const name = randomName();
-    if (taken.has(name)) continue;
-    taken.add(name);
-    seats.push({ name, avatar: { emoji: CPU_EMOJI, colour: pick(AVATAR_COLOURS) }, cpu: true, connected: true });
+    if (names.has(name)) continue;
+    names.add(name);
+    const emoji = freeEmojis.pop() ?? pick(AVATAR_EMOJIS);
+    seats.push({ name, avatar: { emoji, colour: pick(AVATAR_COLOURS) }, cpu: true, connected: true });
   }
   return seats;
 }

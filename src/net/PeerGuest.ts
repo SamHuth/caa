@@ -2,7 +2,7 @@ import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import { CONNECT_TIMEOUT_MS, PEER_TIMEOUT_MS, createPeer, peerIdFor, playerToken } from './peer';
 import type { Profile } from '../ui/profile';
-import type { ClientAction, GuestMsg, HostMsg, Transport } from './protocol';
+import type { ClientAction, GuestMsg, HostMsg, ReactionKey, Transport } from './protocol';
 
 /** A connection from this browser to a host's room. */
 export class PeerGuest implements Transport {
@@ -68,6 +68,10 @@ export class PeerGuest implements Transport {
 
   send(action: ClientAction) {
     this.post({ t: 'action', action });
+  }
+
+  react(key: ReactionKey) {
+    this.post({ t: 'react', react: key });
   }
 
   setReady(ready: boolean) {
