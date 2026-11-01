@@ -26,6 +26,14 @@
   }
 }
 
+@media (max-height: 640px) {
+  /* short phones: leave the table room for the seats and piles */
+  :root {
+    --cw: 48px;
+    --ch: 70px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -49,10 +57,17 @@ body {
   height: 100dvh;
 }
 
+#nl-badge-frame {
+  display: none !important;
+}
+
 button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 button:disabled {
@@ -212,7 +227,48 @@ h3 {
 
 /* home */
 
+.notif-btn {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 16px;
+  font-size: 1.15rem;
+}
+
+.notif-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #e5292f;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.whats-new h3 {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.whats-new ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  line-height: 1.4;
+}
+
 .home {
+  position: relative;
   /* safe: don't clip the top when the profile panel makes it taller than the screen */
   justify-content: safe center;
 }
@@ -1200,55 +1256,25 @@ h3 {
   gap: 8px;
 }
 
-.react-btn {
-  /* floats above your avatar (me-row has 16px side padding, avatar is 38px) */
-  position: absolute;
-  left: 15px;
-  bottom: calc(100% + 8px);
-  z-index: 21;
-  font-size: 1.25rem;
-  background: #0c0a24;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.react-btn[aria-expanded='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.react-tray {
-  position: absolute;
-  left: 62px;
-  bottom: calc(100% + 2px);
-  z-index: 20;
+.react-bar {
   display: flex;
   gap: 2px;
-  padding: 6px;
+  margin: 0 12px 6px;
+  padding: 3px;
   border-radius: 999px;
   background: #0c0a24;
   border: 1px solid var(--panel-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  translate: -10px 0;
-  pointer-events: none;
-  transition:
-    opacity 0.15s,
-    translate 0.15s;
-}
-
-.react-tray.open {
-  opacity: 1;
-  translate: 0 0;
-  pointer-events: auto;
 }
 
 .react-opt {
-  width: 38px;
+  /* share the bar's width so all reactions fit on any phone */
+  flex: 1;
+  min-width: 0;
   height: 38px;
   border: 0;
-  border-radius: 50%;
+  border-radius: 999px;
   background: none;
-  font-size: 1.5rem;
+  font-size: clamp(1rem, 5.2vw, 1.5rem);
   line-height: 1;
   padding: 0;
   transition: transform 0.1s;

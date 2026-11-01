@@ -44,8 +44,8 @@ export class GameScreen {
   private handRow = h('div', { class: 'hand-row' });
   private drawBtn = h('button', { class: 'btn btn-small btn-ghost' }, 'Draw');
   private playBtn = h('button', { class: 'btn btn-small btn-primary' }, 'Play');
-  private reactBtn = h('button', { class: 'btn-round react-btn', 'aria-label': 'Send a reaction', 'aria-expanded': 'false' }, '😀');
-  private reactTray = h('div', { class: 'react-tray', role: 'menu', 'aria-label': 'Reactions' });
+  private reactBar = h('div', { class: 'react-bar', role: 'group', 'aria-label': 'Reactions' });
+  private reactButtons = new Map<ReactionKey, HTMLElement>();
   private lastSentReact = 0;
 
   private colourModal: Modal | null = null;
@@ -74,11 +74,12 @@ export class GameScreen {
     this.drawPile.onclick = () => this.draw();
     this.drawBtn.onclick = () => this.draw();
     this.playBtn.onclick = () => this.send();
-    this.reactBtn.onclick = () => this.toggleTray();
-    this.reactTray.append(
-      ...(Object.keys(REACTIONS) as ReactionKey[]).map((key) =>
-        h('button', { class: 'react-opt', role: 'menuitem', 'aria-label': key, title: key, onclick: () => this.sendReact(key) }, REACTIONS[key]),
-      ),
+    this.reactBar.append(
+      ...(Object.keys(REACTIONS) as ReactionKey[]).map((key) => {
+        const button = h('button', { class: 'react-opt', 'aria-label': key, title: key, onclick: () => this.sendReact(key) }, REACTIONS[key]);
+        this.reactButtons.set(key, button);
+        return button;
+      }),
     );
     this.table.append(
       this.direction,
@@ -101,9 +102,7 @@ export class GameScreen {
         'section',
         { class: 'player-area' },
         this.timerBar,
-        // Floats above your avatar; the tray stays open until toggled closed so reactions can be spammed.
-        this.reactBtn,
-        this.reactTray,
+        this.reactBar,
         h('div', { class: 'me-row' }, this.me, h('div', { class: 'actions' }, this.drawBtn, this.playBtn)),
         this.handEl,
         h('p', { class: 'hand-hint' }, 'Tap cards in order · swipe up to play'),
@@ -143,7 +142,7 @@ export class GameScreen {
       case 'reject':
         return this.reject(msg.reason);
       case 'react':
-        return this.floatReaction(msg.seat, REACTIONS[msg.react]);
+        return this.floatReaction(msg.seat, msg.react);
       case 'closed':
         return this.showClosed(msg.reason);
     }
@@ -193,8 +192,11 @@ export class GameScreen {
     const inHand = new Set(view.hand.map((c) => c.id));
     this.selected = this.selected.filter((id) => inHand.has(id));
     this.focus = Math.min(this.focus, Math.max(0, view.hand.length - 1));
+    const drewCard = events.some((e) => e.type === 'draw' && e.player === view.you && e.reason === 'draw');
+    const autoSelected = drewCard && this.selectPlayable(drawn);
 
     this.render();
+    if (autoSelected) this.handRow.children[this.focus]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     this.justPainted = null;
     this.animate(events, sources);
     this.syncModals();
@@ -367,7 +369,7 @@ export class GameScreen {
     else if (v.gamePhase === 'chooseColour') text = actor === v.you ? 'Pick a colour' : `${name} is picking a colour…`;
     else if (v.gamePhase === 'chooseSwap') text = actor === v.you ? 'Pick a hand to swap with' : `${name} is choosing a hand to swap…`;
     else if (v.out[v.you]) text = `You're out · ${name}'s turn`;
-    else if (v.stack) text = actor === v.you ? `Stack a Draw 2 or Draw 4, or take +${v.stack.count}` : `${name} faces +${v.stack.count}`;
+    else if (v.stack) text = actor === v.you ? `Stack a draw card or take +${v.stack.count}` : `${name} faces +${v.stack.count}`;
     else if (actor === v.you && !this.canPlay) text = v.drawCount === 0 ? "Can't play: pass and you're out" : 'Draw until you can play';
     else if (actor === v.you) text = 'Your turn';
     else text = `${name}'s turn`;
@@ -398,6 +400,7 @@ export class GameScreen {
         h(
           'div',
           { class: 'seat-meta' },
+          h('span', { class: 'seat-cards', title: 'Cards in hand' }, cardBack('mini'), String(v.hand.length)),
           h('span', { class: 'seat-score' }, `${v.scores[v.you]} pts`),
           v.roundWins[v.you] ? h('span', { class: 'seat-wins' }, '★'.repeat(v.roundWins[v.you])) : null,
           v.out[v.you] && v.matchPhase === 'playing' ? h('span', { class: 'out-tag' }, 'OUT') : null,
@@ -459,6 +462,18 @@ export class GameScreen {
     else this.selected.push(id);
     this.focus = Math.max(0, this.view.hand.findIndex((c) => c.id === id));
     this.renderHand();
+  }
+
+  /** After drawing, line up a card you can now play: the drawn one, or one it unlocked in your hand. */
+  private selectPlayable(drawn: Card[]) {
+    const v = this.view!;
+    if (!this.myTurn || v.stack) return false;
+    const ctx = this.playContext(true);
+    const card = [...drawn, ...v.hand].find((c) => checkPlay([c], ctx).ok);
+    if (!card) return false;
+    this.selected = [card.id];
+    this.focus = v.hand.findIndex((c) => c.id === card.id);
+    return true;
   }
 
   private toggleFocused() {
@@ -611,11 +626,6 @@ export class GameScreen {
 
   // ---------------------------------------------------------------- reactions
 
-  private toggleTray(open = !this.reactTray.classList.contains('open')) {
-    this.reactTray.classList.toggle('open', open);
-    this.reactBtn.setAttribute('aria-expanded', String(open));
-  }
-
   private sendReact(key: ReactionKey) {
     const now = Date.now();
     if (now - this.lastSentReact < 150) return; // the host enforces this too
@@ -623,13 +633,12 @@ export class GameScreen {
     this.transport.react(key);
   }
 
-  /** Emoji rises and fades from a player's avatar. */
-  private floatReaction(seat: number, emoji: string) {
-    // Your own rise from above the react button so they don't bury it.
-    const origin = seat === this.view?.you ? this.reactBtn : this.seatAvatar(seat);
+  /** Emoji rises and fades from a player's avatar, or from the button you tapped for your own. */
+  private floatReaction(seat: number, key: ReactionKey) {
+    const origin = seat === this.view?.you ? this.reactButtons.get(key) : this.seatAvatar(seat);
     const from = origin?.getBoundingClientRect();
     if (!from) return;
-    const el = h('span', { class: 'reaction', 'aria-hidden': 'true' }, emoji);
+    const el = h('span', { class: 'reaction', 'aria-hidden': 'true' }, REACTIONS[key]);
     Object.assign(el.style, { left: `${from.left + from.width / 2}px`, top: `${from.top}px` });
     document.body.append(el);
     const drift = (Math.random() - 0.5) * 40;

@@ -41,12 +41,21 @@ describe('reactions', () => {
     expect(reactions()).toHaveLength(2);
   });
 
-  it('a CPU reacts when it is hit with a penalty', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    const { session, reactions } = setup();
-    fire(session, [{ type: 'draw', player: 1, count: 4, reason: 'penalty' }]);
-    vi.advanceTimersByTime(2000);
-    expect(reactions()).toEqual([{ t: 'react', seat: 1, react: 'angry' }]);
+  it('a CPU spams a burst of 3 to 6 of the same emoji when it reacts', () => {
+    for (const [random, burst] of [[0, 3], [0.4, 4], [0.99, 6]] as const) {
+      // The first random is the chance to react at all; the rest set the burst size.
+      vi.spyOn(Math, 'random').mockReturnValue(random).mockReturnValueOnce(0);
+      const { session, reactions } = setup();
+      // A penalty also brings a skip: still only one burst.
+      fire(session, [
+        { type: 'draw', player: 1, count: 4, reason: 'penalty' },
+        { type: 'skip', player: 1 },
+      ]);
+      vi.advanceTimersByTime(4000);
+      expect(reactions()).toHaveLength(burst);
+      expect(new Set(reactions().map((m) => JSON.stringify(m))).size).toBe(1);
+      session.dispose();
+    }
   });
 
   it('humans never get automatic reactions', () => {

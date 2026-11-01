@@ -63,9 +63,10 @@ export interface DrawStack {
   count: number;
 }
 
-/** How much a card adds to a draw stack: Draw 2 → 2, Draw 4 → 4. (The Smiley 8's +2 is immediate and never stacks.) */
+/** How much a card adds to a draw stack: Draw 2 and the Smiley 8 → 2, Draw 4 → 4. */
 export function drawValue(card: Card): number {
-  return card.kind === 'draw2' ? 2 : card.kind === 'draw4' ? 4 : 0;
+  if (card.kind === 'draw2' || card.smiley) return 2;
+  return card.kind === 'draw4' ? 4 : 0;
 }
 
 export interface PlayContext {
@@ -81,9 +82,9 @@ export function checkPlay(cards: Card[], ctx: PlayContext): PlayCheck {
   const { pile, handSize, isTurn, stack } = ctx;
   if (!stack) return isTurn ? validatePlay(cards, pile, handSize) : validateJumpIn(cards, pile, handSize);
 
-  // Facing a stack: Draw 2s and Draw 4s stack on each other, any colour.
+  // Facing a stack: Draw 2s, Draw 4s and the Smiley 8 stack on each other, any colour.
   if (cards.length !== 1 || !drawValue(cards[0])) {
-    return fail(isTurn ? `Stack a Draw 2 or Draw 4, or take +${stack.count}` : 'Only a Draw 2 or Draw 4 can jump in on a stack');
+    return fail(isTurn ? `Stack a Draw 2, Draw 4 or Smiley 8, or take +${stack.count}` : 'Only a draw card can jump in on a stack');
   }
   if (!isTurn && !sameFace(cards[0], pile.top)) return fail('Jump-ins must be the exact same card');
   if (handSize === 1 && isAction(cards[0])) return fail("You can't go out on an action or wild card");

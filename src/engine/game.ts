@@ -232,16 +232,17 @@ export function reduceGame(prev: GameState, action: GameAction): Reduced<GameSta
         break;
       }
 
-      // Draw 2s and Draw 4s stack on each other for the next player to answer or take.
-      const added = drawValue(last);
+      // Draw cards stack for the next player to answer or take. The Smiley 8 only adds to
+      // a stack that already exists; on its own its +2 lands immediately (below).
+      const single = cards.length === 1;
+      const added = last.smiley && s.pendingDraw === 0 ? 0 : drawValue(last);
       if (added) {
         s.pendingDraw += added;
         events.push({ type: 'stack', player: p, total: s.pendingDraw, added });
       }
 
       // Number-card powers only trigger when the card is played on its own.
-      const single = cards.length === 1;
-      if (single && last.smiley) {
+      if (single && last.smiley && !added) {
         const victim = nextPlayer(s);
         const drawn = drawCards(s, victim, SMILEY_PENALTY);
         events.push({ type: 'draw', player: victim, count: drawn.length, cards: drawn, reason: 'smiley' });

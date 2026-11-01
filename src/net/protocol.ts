@@ -11,6 +11,10 @@ export const REACTIONS = {
   skull: '💀',
   beer: '🍺',
   golf: '🏌️',
+  fire: '🔥',
+  clown: '🤡',
+  eyes: '👀',
+  party: '🎉',
 } as const;
 
 export type ReactionKey = keyof typeof REACTIONS;

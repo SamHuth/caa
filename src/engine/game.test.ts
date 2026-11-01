@@ -250,12 +250,15 @@ describe('smiley 8', () => {
     expect(stackOf(state)).toBeNull();
   });
 
-  it('cannot be added to a Draw 2 stack', () => {
-    const d2 = draw2('blue');
+  it('can be added to a draw stack for +2, in any colour, and is not drawn straight away', () => {
+    const d2 = draw2('red');
     const sm = smiley();
-    const s = makeGame({ hands: [[d2, num('red', 1)], [sm, num('red', 2)], [num('red', 3)]], top: num('blue', 3) });
-    const { state } = apply(s, { type: 'play', player: 0, cardIds: [d2.id] });
-    expect(reduceGame(state, { type: 'play', player: 1, cardIds: [sm.id] }).ok).toBe(false);
+    const s = makeGame({ hands: [[d2, num('red', 1)], [sm, num('red', 2)], [num('red', 3)]], top: num('red', 3) });
+    let { state } = apply(s, { type: 'play', player: 0, cardIds: [d2.id] });
+    ({ state } = apply(state, { type: 'play', player: 1, cardIds: [sm.id] }));
+    expect(stackOf(state)).toEqual({ count: 4 });
+    expect(state.hands[2]).toHaveLength(1);
+    expect(state.current).toBe(2);
   });
 
   it('has no +2 when played as part of a double', () => {

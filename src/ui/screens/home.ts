@@ -1,7 +1,11 @@
 import { go } from '../app';
-import { h } from '../dom';
-import { AVATAR_COLOURS, AVATAR_EMOJIS, NAME_MAX, avatarEl, profile, randomName } from '../profile';
+import { totalChanges } from '../changelog';
+import { h, store } from '../dom';
+import { AVATAR_COLOURS, AVATAR_EMOJIS, NAME_MAX, avatarEl, profile, randomAvatar, randomName } from '../profile';
 import { showHowToPlay } from './howToPlay';
+import { showWhatsNew } from './whatsNew';
+
+const SEEN_KEY = 'changes-seen';
 
 export function homeScreen() {
   const me = profile.get();
@@ -42,19 +46,41 @@ export function homeScreen() {
   });
   const dice = h('button', {
     class: 'btn-round dice',
-    'aria-label': 'Random name',
-    title: 'Random name',
+    'aria-label': 'Random name and avatar',
+    title: 'Random name and avatar',
     onclick: () => {
       name.value = me.name = randomName();
+      me.avatar = randomAvatar();
       save();
+      refresh();
       dice.animate([{ rotate: '0deg' }, { rotate: '360deg' }], { duration: 400, easing: 'ease-out' });
     },
   }, '🎲');
+
+  // Bell with a red badge counting changes this browser hasn't seen yet.
+  const unseen = Math.max(0, totalChanges - store.get(SEEN_KEY, 0));
+  const badge = unseen ? h('span', { class: 'notif-badge' }, unseen > 9 ? '9+' : unseen) : null;
+  const bell = h(
+    'button',
+    {
+      class: 'btn-round notif-btn',
+      'aria-label': unseen ? `What's new: ${unseen} new changes` : "What's new",
+      onclick: () => {
+        store.set(SEEN_KEY, totalChanges);
+        badge?.remove();
+        bell.setAttribute('aria-label', "What's new");
+        showWhatsNew();
+      },
+    },
+    '🔔',
+    badge,
+  );
 
   refresh();
   return h(
     'main',
     { class: 'screen home' },
+    bell,
     h(
       'div',
       { class: 'logo small' },

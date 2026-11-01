@@ -16,8 +16,8 @@ export interface Settings {
 
 export const LIMITS = {
   playerCount: [2, 8],
-  turnTimer: [10, 30],
-  handSize: [7, 10],
+  turnTimer: [5, 30],
+  handSize: [5, 15],
   roundScoreLimit: [50, 500],
   bestOf: [1, 7],
 } as const;

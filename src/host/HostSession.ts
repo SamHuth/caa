@@ -13,6 +13,9 @@ const NEXT_GAME_MS = 6000;
 const REACT_COOLDOWN_MS = 150;
 /** How often a CPU reacts when something happens to it. */
 const CPU_REACT_CHANCE = 0.45;
+/** CPUs spam a burst of the same emoji when they react. */
+const CPU_BURST_MIN = 3;
+const CPU_BURST_MAX = 6;
 const NEXT_ROUND_MS = 8000;
 
 /**
@@ -156,13 +159,20 @@ export class HostSession {
         }
       }
     }
+    const reacted = new Set<number>();
     for (const [seat, options] of reactions) {
-      if (!this.seats[seat]?.cpu || Math.random() > CPU_REACT_CHANCE) continue;
-      const timer = setTimeout(() => {
-        this.reactTimers.delete(timer);
-        this.react(seat, pick(options));
-      }, 400 + Math.random() * 900);
-      this.reactTimers.add(timer);
+      if (reacted.has(seat) || !this.seats[seat]?.cpu || Math.random() > CPU_REACT_CHANCE) continue;
+      reacted.add(seat); // one burst per event, even if several things hit this CPU at once
+      const key = pick(options);
+      const count = CPU_BURST_MIN + Math.floor(Math.random() * (CPU_BURST_MAX - CPU_BURST_MIN + 1));
+      const start = 400 + Math.random() * 900;
+      for (let i = 0; i < count; i++) {
+        const timer = setTimeout(() => {
+          this.reactTimers.delete(timer);
+          this.react(seat, key);
+        }, start + i * (REACT_COOLDOWN_MS + 30 + Math.random() * 80));
+        this.reactTimers.add(timer);
+      }
     }
   }
 

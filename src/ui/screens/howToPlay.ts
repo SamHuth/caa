@@ -13,7 +13,7 @@ export function showHowToPlay() {
         {},
         li('Numbers ', b('0–12'), ', ', b('Skip'), ', ', b('Reverse'), ' and ', b('Draw 2'), ' in red, yellow, green and blue (two of each).'),
         li(b('4 Wild'), ' (choose the next colour) and ', b('4 Draw 4'), ' (next player draws 4, and you choose the colour).'),
-        li('One blue 8 is the ', b('Smiley 8 ☺'), '. Played on its own, the next player also draws 2.'),
+        li('One blue 8 is the ', b('Smiley 8 ☺'), '. Played on its own, the next player also draws 2. It can also be added to a draw stack for +2.'),
       ),
       h('h3', {}, 'Special cards'),
       h(
@@ -45,7 +45,7 @@ export function showHowToPlay() {
       h(
         'ul',
         {},
-        li('Hit by a Draw 2 or Draw 4? Play any ', b('Draw 2'), ' or ', b('Draw 4'), ' to add to it and pass the total on. They stack on each other.'),
+        li('Hit by a Draw 2 or Draw 4? Play any ', b('Draw 2'), ', ', b('Draw 4'), ' or the ', b('Smiley 8'), ' to add to it and pass the total on.'),
         li('Can’t (or won’t) stack? ', b('Take'), ' the whole pile of cards and lose your turn.'),
         li('Jump-ins add to the stack too.'),
       ),

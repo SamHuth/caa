@@ -31,6 +31,10 @@ src/net/      PeerJS host/guest, room codes, message protocol
 src/ui/       screens (home, settings, multiplayer, lobby), game screen, touch/keyboard input
 ```
 
+## Before pushing
+
+Add every change to the top of `src/ui/changelog.ts`, one short player-facing line each. That list feeds What's New on the home screen, and its red badge counts changes a player hasn't seen yet.
+
 ## Open items
 
 - Sounds and PWA install manifest.
