@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { DECK_SIZE } from './cards';
 import { cpuColour, cpuJumpIn, cpuMove } from './cpu';
 import { activePlayers, nextPlayer, pileOf, smallestOtherHand, stackOf } from './game';
-import { type Difficulty, DEFAULT_SETTINGS, type MatchState, newMatch, reduceMatch } from './match';
+import { type Difficulty, DEFAULT_SETTINGS, type MatchState, type Settings, newMatch, reduceMatch } from './match';
 import { rand } from './rng';
 
 /** Play whole matches CPU vs CPU, checking invariants after every action. */
-function simulate(seed: number, players: number, difficulty: Difficulty) {
+function simulate(seed: number, players: number, difficulty: Difficulty, handSize: Settings['handSize'] = DEFAULT_SETTINGS.handSize) {
   let { state: m } = newMatch(
-    { ...DEFAULT_SETTINGS, playerCount: players, cpuDifficulty: difficulty, roundScoreLimit: 100, bestOf: 3 },
+    { ...DEFAULT_SETTINGS, playerCount: players, cpuDifficulty: difficulty, roundScoreLimit: 100, bestOf: 3, handSize },
     seed,
   );
   const r = { rng: seed };
@@ -78,6 +78,15 @@ function simulate(seed: number, players: number, difficulty: Difficulty) {
 }
 
 describe('simulation', () => {
+  it('plays full matches with the whole deck dealt', () => {
+    for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+      for (let seed = 1; seed <= 6; seed++) {
+        const m = simulate(seed * 104_729, 2 + (seed % 7), difficulty, 'max');
+        expect(m.lastResult?.matchWinner).not.toBeNull();
+      }
+    }
+  }, 60_000);
+
   for (const difficulty of ['easy', 'medium', 'hard'] as const) {
     it(`plays full ${difficulty} matches without illegal states`, () => {
       for (let seed = 1; seed <= 40; seed++) {

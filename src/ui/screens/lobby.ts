@@ -29,7 +29,7 @@ function settingsSummary(lobby: LobbyInfo) {
     h('li', {}, `${s.playerCount} players`),
     h('li', {}, `CPU: ${s.cpuDifficulty}`),
     h('li', {}, `${s.turnTimer}s turns`),
-    h('li', {}, `${s.handSize} cards`),
+    h('li', {}, s.handSize === 'max' ? 'Whole deck dealt' : `${s.handSize} cards`),
     h('li', {}, `First to ${s.roundScoreLimit}`),
     h('li', {}, `Best of ${s.bestOf}`),
   );

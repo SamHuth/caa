@@ -3,7 +3,7 @@ import { activePlayers, nextPlayer, pileOf, smallestOtherHand, stackOf, topCard 
 import { type MatchAction, type MatchEvent, type MatchState, type Settings, newMatch, reduceMatch } from '../engine/match';
 import { randomSeed } from '../engine/rng';
 import { redact, redactEvents } from '../engine/view';
-import { type ClientAction, type ClientView, type HostMsg, type ReactionKey, type SeatInfo, type Transport, isReaction } from '../net/protocol';
+import { CARD_FLIP_MS, COUNTDOWN_MS, type ClientAction, type ClientView, type HostMsg, type ReactionKey, type SeatInfo, type Transport, isReaction } from '../net/protocol';
 
 type Listener = (msg: HostMsg) => void;
 type Timer = ReturnType<typeof setTimeout>;
@@ -35,6 +35,8 @@ export class HostSession {
   /** Game clock: when the current game started, and when it ended (frozen between games). */
   private gameStartedAt = Date.now();
   private gameEndedAt: number | null = null;
+  /** While set, the game is counting down: no turns, timers, CPU moves or jump-ins until then. */
+  private startsAt: number | null = null;
   private nextGameAt: number | null = null;
   /** CPU reaction timers: independent of game timers so state changes don't cancel them. */
   private reactTimers = new Set<Timer>();
@@ -73,6 +75,10 @@ export class HostSession {
   }
 
   submit(seat: number, action: ClientAction) {
+    if (this.startsAt !== null) {
+      this.listeners.get(seat)?.({ t: 'reject', reason: 'Get ready…' });
+      return;
+    }
     const delay = this.jumpDelay.get(seat) ?? 0;
     const outOfTurn = action.type === 'play' && seat !== this.m.game.current;
     if (outOfTurn && delay > 0) setTimeout(() => this.apply(seat, { ...action, player: seat }), delay);
@@ -117,7 +123,8 @@ export class HostSession {
     this.cpuReactions(events);
     if (events.some((e) => e.type === 'gameOver')) this.gameEndedAt = Date.now();
     if (events.some((e) => e.type === 'newGame')) {
-      this.gameStartedAt = Date.now();
+      this.startsAt = Date.now() + COUNTDOWN_MS + CARD_FLIP_MS;
+      this.gameStartedAt = this.startsAt; // the game clock starts when play opens
       this.gameEndedAt = null;
       // Card ids repeat between games, so forget the previous jump-in plans.
       this.clearJumpTimers();
@@ -183,7 +190,8 @@ export class HostSession {
       seats: this.seats,
       turnMsLeft: this.turnDeadline === null ? null : Math.max(0, this.turnDeadline - now),
       nextGameMs: this.nextGameAt === null ? null : Math.max(0, this.nextGameAt - now),
-      gameElapsedMs: (this.gameEndedAt ?? now) - this.gameStartedAt,
+      gameElapsedMs: Math.max(0, (this.gameEndedAt ?? now) - this.gameStartedAt),
+      countdownMs: this.startsAt === null ? null : Math.max(0, this.startsAt - now),
     };
     return { t: 'state', view, events: redactEvents(events, seat) };
   }
@@ -206,6 +214,14 @@ export class HostSession {
       return;
     }
     if (m.phase !== 'playing') return;
+
+    if (this.startsAt !== null) {
+      this.later(Math.max(0, this.startsAt - Date.now()), () => {
+        this.startsAt = null;
+        this.afterChange([]);
+      });
+      return;
+    }
 
     const actor = g.chooser ?? g.current;
     const turn = g.turn;

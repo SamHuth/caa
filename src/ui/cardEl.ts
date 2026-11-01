@@ -18,6 +18,13 @@ function face(card: Card): string {
   }
 }
 
+/** The Smiley 8's face: the 8's loops are the eyes, with a mouth drawn to the side, like 8) */
+function smileyMouth() {
+  const mouth = h('span', { class: 'mouth', 'aria-hidden': 'true' });
+  mouth.innerHTML = '<svg viewBox="0 0 12 32"><path d="M2 3 Q14 16 2 29"/></svg>';
+  return mouth;
+}
+
 /** `paint` shows a wild / draw 4 in the colour chosen for it. */
 export function cardEl(card: Card, extraClass = '', paint?: Colour): HTMLDivElement {
   const f = face(card);
@@ -30,8 +37,7 @@ export function cardEl(card: Card, extraClass = '', paint?: Colour): HTMLDivElem
       'aria-label': paint ? `${cardLabel(card)} (${paint})` : cardLabel(card),
     },
     h('span', { class: 'corner tl' }, f),
-    h('span', { class: 'pip' }, h('span', { class: 'face' }, f)),
-    card.smiley ? h('span', { class: 'smile' }, '☺ +2') : null,
+    h('span', { class: 'pip' }, h('span', { class: 'face' }, f, card.smiley ? smileyMouth() : null)),
     h('span', { class: 'corner br' }, f),
   );
 }

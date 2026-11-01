@@ -1,4 +1,4 @@
-import { type Difficulty, LIMITS, type Settings, maxHandSize } from '../../engine/match';
+import { type Difficulty, LIMITS, type Settings } from '../../engine/match';
 import { PeerHost } from '../../net/PeerHost';
 import { go, savedSettings } from '../app';
 import { profile } from '../profile';
@@ -20,12 +20,12 @@ function stepper(label: string, get: () => number, set: (v: number) => void, opt
   return h('div', { class: 'setting' }, h('span', { class: 'setting-label' }, label), h('div', { class: 'stepper' }, dec, value, inc));
 }
 
-function segmented<T extends string | number>(label: string, options: [T, string][], get: () => T, set: (v: T) => void) {
+function segmented<T extends string | number>(label: string, options: [T, string][], get: () => T, set: (v: T) => void, extraClass = '') {
   const buttons = options.map(([v, text]) =>
     h('button', { class: 'seg', onclick: () => (set(v), refreshAll()) }, text),
   );
   refreshers.push(() => buttons.forEach((b, i) => b.classList.toggle('active', options[i][0] === get())));
-  return h('div', { class: 'setting' }, h('span', { class: 'setting-label' }, label), h('div', { class: 'segmented' }, ...buttons));
+  return h('div', { class: 'setting' }, h('span', { class: 'setting-label' }, label), h('div', { class: `segmented ${extraClass}` }, ...buttons));
 }
 
 let refreshers: (() => void)[] = [];
@@ -34,11 +34,11 @@ const refreshAll = () => refreshers.forEach((r) => r());
 export function settingsScreen(mode: 'single' | 'host') {
   refreshers = [];
   const s: Settings = savedSettings.get();
-  const clampHand = () => (s.handSize = Math.min(s.handSize, maxHandSize(s.playerCount)));
+  const [minHand, maxHand] = LIMITS.handSize;
+  const handOptions: [Settings['handSize'], string][] = Array.from({ length: maxHand - minHand + 1 }, (_, i) => [minHand + i, String(minHand + i)]);
 
   const start = h('button', { class: 'btn btn-primary' }, mode === 'single' ? 'Start Game' : 'Create Room');
   start.onclick = async () => {
-    clampHand();
     savedSettings.set(s);
     if (mode === 'single') return go.singlePlayer(s);
     start.disabled = true;
@@ -59,14 +59,14 @@ export function settingsScreen(mode: 'single' | 'host') {
     h(
       'div',
       { class: 'panel' },
-      stepper('Players', () => s.playerCount, (v) => ((s.playerCount = v), clampHand()), {
+      stepper('Players', () => s.playerCount, (v) => (s.playerCount = v), {
         min: () => LIMITS.playerCount[0],
         max: () => LIMITS.playerCount[1],
       }),
       h('p', { class: 'hint' }, mode === 'host' ? 'Seats nobody joins are filled by CPUs.' : 'Everyone else is a CPU.'),
       segmented<Difficulty>('CPU difficulty', [['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']], () => s.cpuDifficulty, (v) => (s.cpuDifficulty = v)),
       stepper('Turn timer', () => s.turnTimer, (v) => (s.turnTimer = v), { min: () => LIMITS.turnTimer[0], max: () => LIMITS.turnTimer[1], unit: 's' }),
-      stepper('Starting hand', () => s.handSize, (v) => (s.handSize = v), { min: () => LIMITS.handSize[0], max: () => maxHandSize(s.playerCount) }),
+      segmented<Settings['handSize']>('Starting hand', [...handOptions, ['max', 'MAX']], () => s.handSize, (v) => (s.handSize = v), 'tight'),
       stepper('Round score limit', () => s.roundScoreLimit, (v) => (s.roundScoreLimit = v), {
         min: () => LIMITS.roundScoreLimit[0],
         max: () => LIMITS.roundScoreLimit[1],

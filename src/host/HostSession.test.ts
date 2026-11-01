@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, type MatchEvent } from '../engine/match';
-import type { HostMsg, SeatInfo } from '../net/protocol';
+import { CARD_FLIP_MS, COUNTDOWN_MS, type HostMsg, type SeatInfo } from '../net/protocol';
 import { HostSession } from './HostSession';
 
 const seat = (name: string, cpu: boolean): SeatInfo => ({ name, avatar: { emoji: '🦊', colour: '#e5484d' }, cpu, connected: true });
@@ -16,6 +16,57 @@ function setup() {
 /** Feed events through the session's CPU reaction hook without playing a real game. */
 const fire = (session: HostSession, events: MatchEvent[]) =>
   (session as unknown as { cpuReactions(e: MatchEvent[]): void }).cpuReactions(events);
+
+describe('start of game countdown', () => {
+  const LOCK_MS = COUNTDOWN_MS + CARD_FLIP_MS;
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function started(seats: SeatInfo[]) {
+    const session = new HostSession(seats, { ...DEFAULT_SETTINGS, playerCount: seats.length });
+    const received: HostMsg[] = [];
+    session.attach(0, (m) => received.push(m));
+    session.start();
+    const states = () => received.flatMap((m) => (m.t === 'state' ? [m] : []));
+    return { session, received, states, last: () => states().at(-1)! };
+  }
+
+  it('holds the game until the countdown and card flip are done', () => {
+    const { last } = started([seat('Me', false), seat('Bot', true)]);
+    expect(last().view.countdownMs).toBe(LOCK_MS);
+    expect(last().view.turnMsLeft).toBeNull();
+    expect(last().view.gameElapsedMs).toBe(0);
+    vi.advanceTimersByTime(LOCK_MS - 1);
+    expect(last().view.countdownMs).toBe(LOCK_MS);
+    vi.advanceTimersByTime(1);
+    expect(last().view.countdownMs).toBeNull();
+    expect(last().view.gameElapsedMs).toBe(0);
+  });
+
+  it('rejects actions while counting down', () => {
+    const { session, received, states } = started([seat('Me', false), seat('Bot', true)]);
+    const before = states().length;
+    session.submit(0, { type: 'draw' });
+    expect(received.at(-1)).toEqual({ t: 'reject', reason: 'Get ready…' });
+    expect(states()).toHaveLength(before);
+  });
+
+  it('CPUs wait for the countdown too', () => {
+    const { states } = started([seat('Bot', true), seat('Bot 2', true)]);
+    vi.advanceTimersByTime(LOCK_MS - 1);
+    expect(states().flatMap((s) => s.events).filter((e) => e.type === 'play' || e.type === 'draw')).toEqual([]);
+    vi.advanceTimersByTime(8000);
+    expect(states().flatMap((s) => s.events).some((e) => e.type === 'play' || e.type === 'draw')).toBe(true);
+  });
+
+  it('counts down again for a rematch', () => {
+    const { session, last } = started([seat('Me', false), seat('Bot', true)]);
+    vi.advanceTimersByTime(LOCK_MS);
+    session.start();
+    expect(last().view.countdownMs).toBe(LOCK_MS);
+  });
+});
 
 describe('reactions', () => {
   beforeEach(() => vi.useFakeTimers());

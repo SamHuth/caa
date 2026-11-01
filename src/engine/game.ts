@@ -91,7 +91,8 @@ export function canPlayAny(s: GameState, player = s.current): boolean {
   return hand.some((c) => checkPlay([c], ctx).ok);
 }
 
-export function newGame(players: number, handSize: number, seed: number): { state: GameState; events: GameEvent[] } {
+/** `handSize` of 'max' deals out the whole deck, leaving no draw pile. */
+export function newGame(players: number, handSize: number | 'max', seed: number): { state: GameState; events: GameEvent[] } {
   const s: GameState = {
     rng: seed,
     hands: Array.from({ length: players }, () => []),
@@ -110,14 +111,17 @@ export function newGame(players: number, handSize: number, seed: number): { stat
     turn: 0,
   };
   s.drawPile = shuffle(s, buildDeck());
-  for (let i = 0; i < handSize; i++) {
-    for (const hand of s.hands) hand.push(s.drawPile.pop()!);
-  }
-  // Start the pile with a plain number card.
+  // Set aside a plain number card to start the pile, before anything is dealt.
   const startIdx = s.drawPile.findLastIndex((c) => c.kind === 'number' && !c.smiley);
   const [start] = s.drawPile.splice(startIdx, 1);
   s.discard.push(start);
   s.colour = start.colour!;
+  const rounds = handSize === 'max' ? Infinity : handSize;
+  for (let i = 0; i < rounds && s.drawPile.length > 0; i++) {
+    for (const hand of s.hands) {
+      if (s.drawPile.length > 0) hand.push(s.drawPile.pop()!);
+    }
+  }
   s.current = randInt(s, players);
   return { state: s, events: [{ type: 'turn', player: s.current }] };
 }

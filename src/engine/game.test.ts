@@ -18,6 +18,23 @@ describe('newGame', () => {
   });
 });
 
+describe('dealing the whole deck', () => {
+  it.each([2, 3, 4, 5, 6, 7, 8])('MAX deals every card evenly between %i players', (players) => {
+    const { state } = newGame(players, 'max', 123 + players);
+    const sizes = state.hands.map((h) => h.length);
+    expect(state.drawPile).toHaveLength(0);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(DECK_SIZE - 1);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+    expect(topCard(state)).toMatchObject({ kind: 'number' });
+    expect(topCard(state).smiley).toBeUndefined();
+  });
+
+  it('a player who cannot play on the first turn is out straight away', () => {
+    const s = makeGame({ hands: [[num('blue', 1)], [num('green', 2)], [num('yellow', 3)]], top: num('red', 9), drawPile: [] });
+    expect(apply(s, { type: 'draw', player: 0 }).state.out[0]).toBe(true);
+  });
+});
+
 describe('turn flow', () => {
   it('a number card passes the turn on', () => {
     const red5 = num('red', 5);

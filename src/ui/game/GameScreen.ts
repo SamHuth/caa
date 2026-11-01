@@ -1,7 +1,7 @@
 import { type Card, COLOURS, type Colour, compareCards, isWild, sameFace } from '../../engine/cards';
 import type { MatchEvent } from '../../engine/match';
 import { type PlayContext, checkPlay } from '../../engine/rules';
-import { type ClientView, type HostMsg, REACTIONS, type ReactionKey, type Transport } from '../../net/protocol';
+import { CARD_FLIP_MS, type ClientView, type HostMsg, REACTIONS, type ReactionKey, type Transport } from '../../net/protocol';
 import { go } from '../app';
 import { cardBack, cardEl } from '../cardEl';
 import { h, modal, toast } from '../dom';
@@ -10,6 +10,9 @@ import { HandInput } from './HandInput';
 const RING_C = 2 * Math.PI * 30;
 const FLY_MS = 380;
 const PILE_VISIBLE = 4;
+const REACTION_MS = 3200;
+const REACTION_RISE = 300;
+const REACTION_MIN_RISE = 90;
 
 type Modal = ReturnType<typeof modal>;
 
@@ -26,6 +29,13 @@ export class GameScreen {
   private fresh = new Set<number>();
   private freshTimer: ReturnType<typeof setTimeout> | undefined;
   private pile: Card[] = [];
+  /** Start-of-game overlay: 3, 2, 1, then the first card flips onto the pile. */
+  private countdownEl = h('div', { class: 'countdown', 'aria-live': 'assertive' });
+  private countdownTimers: ReturnType<typeof setTimeout>[] = [];
+  private counting = false;
+  /** The centre pile stays empty until the first card has landed. */
+  private startCardHidden = false;
+  private flipGhost: HTMLElement | null = null;
   /** Colour chosen for each wild on the pile (card ids repeat between games, so reset per game). */
   private painted = new Map<number, Colour>();
   /** Wild painted by this update, which gets a flip animation. */
@@ -87,6 +97,7 @@ export class GameScreen {
       this.seatsLayer,
       h('div', { class: 'centre' }, h('div', { class: 'piles' }, this.drawPile, this.discard), this.status),
       this.banner,
+      this.countdownEl,
     );
     this.el = h(
       'main',
@@ -130,6 +141,7 @@ export class GameScreen {
     clearInterval(this.countdown);
     clearInterval(this.clockTimer);
     clearTimeout(this.freshTimer);
+    this.clearCountdown();
     this.colourModal?.close();
     this.swapModal?.close();
     this.resultModal?.close();
@@ -167,6 +179,7 @@ export class GameScreen {
       this.selected = [];
       this.resultModal?.close();
       this.resultModal = null;
+      this.resultKey = '';
     }
     for (const e of events) {
       if (e.type === 'play') this.pile.push(...e.cards);
@@ -192,6 +205,7 @@ export class GameScreen {
     const inHand = new Set(view.hand.map((c) => c.id));
     this.selected = this.selected.filter((id) => inHand.has(id));
     this.focus = Math.min(this.focus, Math.max(0, view.hand.length - 1));
+    if (view.countdownMs !== null && !this.counting) this.startCountdown(view.countdownMs);
     const drewCard = events.some((e) => e.type === 'draw' && e.player === view.you && e.reason === 'draw');
     const autoSelected = drewCard && this.selectPlayable(drawn);
 
@@ -208,9 +222,9 @@ export class GameScreen {
       h('span', { class: 'pill' }, `Round ${v.round} · Game ${v.gameNumber}`),
       h('span', { class: 'pill subtle' }, `First to ${v.settings.roundScoreLimit} · Bo${v.settings.bestOf}`),
     );
-    this.table.classList.toggle('live', v.matchPhase === 'playing');
+    this.table.classList.toggle('live', this.inPlay);
     this.clockBase = Date.now() - v.gameElapsedMs;
-    this.clockRunning = v.matchPhase === 'playing';
+    this.clockRunning = this.inPlay;
     this.tickClock(v.gameElapsedMs);
     this.renderSeats();
     this.renderPiles();
@@ -228,7 +242,7 @@ export class GameScreen {
 
   private pointAtActor() {
     const v = this.view;
-    const live = v?.matchPhase === 'playing';
+    const live = !!v && this.inPlay;
     this.pointer.classList.toggle('on', live);
     if (!v || !live) return;
     const target = this.seatAvatar(this.actor(v))?.getBoundingClientRect();
@@ -251,9 +265,15 @@ export class GameScreen {
     navigator.vibrate?.(40);
   }
 
+  /** A game is under way and past its opening countdown. */
+  private get inPlay() {
+    const v = this.view!;
+    return v.matchPhase === 'playing' && v.countdownMs === null;
+  }
+
   private get myTurn() {
     const v = this.view!;
-    return v.matchPhase === 'playing' && v.gamePhase === 'play' && v.current === v.you;
+    return this.inPlay && v.gamePhase === 'play' && v.current === v.you;
   }
 
   /** Draw button: take a stack, or draw-until-playable once per turn. */
@@ -295,7 +315,7 @@ export class GameScreen {
   private seatEl(seat: number, pos: Partial<CSSStyleDeclaration>) {
     const v = this.view!;
     const info = v.seats[seat];
-    const isActor = v.matchPhase === 'playing' && this.actor(v) === seat;
+    const isActor = this.inPlay && this.actor(v) === seat;
     return h(
       'div',
       {
@@ -343,17 +363,20 @@ export class GameScreen {
 
   private renderPiles() {
     const v = this.view!;
+    // The first card is still on the pile until it flips (even if it's the only one left).
+    const drawLeft = v.drawCount + (this.startCardHidden ? 1 : 0);
     this.drawPile.replaceChildren(
-      ...(v.drawCount > 0
-        ? [cardBack('stack-3'), cardBack('stack-2'), cardBack(), h('span', { class: 'pile-count' }, String(v.drawCount))]
+      ...(drawLeft > 0
+        ? [cardBack('stack-3'), cardBack('stack-2'), cardBack(), h('span', { class: 'pile-count' }, String(drawLeft))]
         : [h('span', { class: 'pile-empty' }, 'Empty'), h('span', { class: 'pile-count' }, 'Pass = out')]),
     );
     this.drawPile.disabled = !this.canDraw;
     this.drawPile.classList.toggle('hot', this.canDraw);
 
     this.discard.style.setProperty('--active', `var(--${v.colour})`);
+    this.discard.classList.toggle('waiting', this.startCardHidden);
     this.discard.replaceChildren(
-      ...this.pile.map((c, i) => {
+      ...(this.startCardHidden ? [] : this.pile).map((c, i) => {
         const s = scatter(c.id);
         const el = cardEl(c, `${i === this.pile.length - 1 ? 'top' : ''} ${c.id === this.justPainted ? 'paint-flip' : ''}`, this.paintFor(c));
         el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.rot}deg)`;
@@ -365,7 +388,7 @@ export class GameScreen {
     const actor = this.actor(v);
     const name = actor === v.you ? 'You' : v.seats[actor].name;
     let text = '';
-    if (v.matchPhase !== 'playing') text = '';
+    if (!this.inPlay) text = '';
     else if (v.gamePhase === 'chooseColour') text = actor === v.you ? 'Pick a colour' : `${name} is picking a colour…`;
     else if (v.gamePhase === 'chooseSwap') text = actor === v.you ? 'Pick a hand to swap with' : `${name} is choosing a hand to swap…`;
     else if (v.out[v.you]) text = `You're out · ${name}'s turn`;
@@ -390,7 +413,7 @@ export class GameScreen {
 
   private renderMe() {
     const v = this.view!;
-    const isActor = v.matchPhase === 'playing' && this.actor(v) === v.you;
+    const isActor = this.inPlay && this.actor(v) === v.you;
     this.me.replaceChildren(
       this.avatar(v.you, false),
       h(
@@ -441,7 +464,7 @@ export class GameScreen {
 
   private canJumpIn(c: Card) {
     const v = this.view!;
-    return v.matchPhase === 'playing' && v.gamePhase === 'play' && v.current !== v.you && !v.out[v.you] && checkPlay([c], this.playContext(false)).ok;
+    return this.inPlay && v.gamePhase === 'play' && v.current !== v.you && !v.out[v.you] && checkPlay([c], this.playContext(false)).ok;
   }
 
   /** Overlap cards so they fit, but keep each one's visible strip big enough to tap. */
@@ -491,6 +514,7 @@ export class GameScreen {
   private send() {
     const v = this.view;
     if (!v || this.pending || v.matchPhase !== 'playing') return;
+    if (v.countdownMs !== null) return toast('Get ready…');
     if (v.out[v.you]) return toast("You're out of this game");
     if (this.selected.length === 0) return toast('Tap cards to select them first');
     const cards = this.selected.map((id) => v.hand.find((c) => c.id === id)!);
@@ -598,9 +622,6 @@ export class GameScreen {
           this.seatBadge(e.player, 'Out!');
           this.flashBanner(e.player === v.you ? "No cards left to draw: you're out!" : `${nameOf(e.player)} is out!`, 'bad');
           break;
-        case 'newGame':
-          this.flashBanner(e.gameNumber === 1 ? `Round ${e.round}` : `Game ${e.gameNumber}`);
-          break;
       }
     }
   }
@@ -624,6 +645,69 @@ export class GameScreen {
     }
   }
 
+  // ---------------------------------------------------------------- start of game
+
+  /** Runs on each player's clock from the host's remaining time, so a rejoin picks up part-way. */
+  private startCountdown(ms: number) {
+    this.clearCountdown();
+    this.counting = true;
+    this.startCardHidden = true;
+    const flipIn = Math.max(0, ms - CARD_FLIP_MS);
+    for (let n = Math.ceil(flipIn / 1000); n >= 1; n--) {
+      this.countdownTimers.push(setTimeout(() => this.showCount(n), flipIn - n * 1000));
+    }
+    this.countdownTimers.push(setTimeout(() => this.flipStartCard(Math.min(CARD_FLIP_MS, ms)), flipIn));
+  }
+
+  private showCount(n: number) {
+    const v = this.view!;
+    const first = v.current === v.you ? 'You go first' : `${v.seats[v.current].name} goes first`;
+    this.countdownEl.replaceChildren(
+      h('p', { class: 'countdown-label' }, v.gameNumber === 1 ? `Round ${v.round}` : `Game ${v.gameNumber}`),
+      h('p', { class: 'countdown-number' }, String(n)),
+      h('p', { class: 'countdown-first' }, first),
+    );
+  }
+
+  /** The top of the draw pile turns over as it travels, landing exactly where the card will sit. */
+  private flipStartCard(duration: number) {
+    const v = this.view!;
+    this.countdownEl.replaceChildren();
+    const from = this.drawPile.getBoundingClientRect();
+    const to = this.discard.getBoundingClientRect();
+    const s = scatter(v.top.id);
+    const inner = h('div', { class: 'flip-inner' }, cardBack('flip-face'), cardEl(v.top, 'flip-face flip-front'));
+    const ghost = (this.flipGhost = h('div', { class: 'flip-ghost' }, inner));
+    Object.assign(ghost.style, { left: `${to.left}px`, top: `${to.top}px` });
+    document.body.append(ghost);
+
+    const timing = { duration, easing: 'cubic-bezier(.3,.7,.3,1)', fill: 'forwards' } as const;
+    inner.animate([{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(180deg)' }], timing);
+    ghost
+      .animate(
+        [
+          { translate: `${from.left - to.left}px ${from.top - to.top}px`, rotate: '0deg', scale: '1' },
+          { scale: '1.3', offset: 0.5 },
+          { translate: `${s.x}px ${s.y}px`, rotate: `${s.rot}deg`, scale: '1' },
+        ],
+        timing,
+      )
+      .finished.then(() => {
+        this.clearCountdown();
+        this.renderPiles();
+      });
+  }
+
+  private clearCountdown() {
+    this.countdownTimers.forEach(clearTimeout);
+    this.countdownTimers = [];
+    this.flipGhost?.remove();
+    this.flipGhost = null;
+    this.countdownEl.replaceChildren();
+    this.counting = false;
+    this.startCardHidden = false;
+  }
+
   // ---------------------------------------------------------------- reactions
 
   private sendReact(key: ReactionKey) {
@@ -641,15 +725,17 @@ export class GameScreen {
     const el = h('span', { class: 'reaction', 'aria-hidden': 'true' }, REACTIONS[key]);
     Object.assign(el.style, { left: `${from.left + from.width / 2}px`, top: `${from.top}px` });
     document.body.append(el);
-    const drift = (Math.random() - 0.5) * 40;
+    const drift = (Math.random() - 0.5) * 80;
+    // Seats near the top of the screen have less room to rise.
+    const rise = Math.max(REACTION_MIN_RISE, Math.min(REACTION_RISE, from.top));
     el.animate(
       [
         { translate: '-50% 0', scale: '0.4', opacity: 0 },
-        { translate: '-50% -24px', scale: '1.25', opacity: 1, offset: 0.15 },
-        { translate: `calc(-50% + ${drift / 2}px) -60px`, scale: '1', opacity: 1, offset: 0.55 },
-        { translate: `calc(-50% + ${drift}px) -110px`, scale: '0.9', opacity: 0 },
+        { translate: `-50% ${-rise * 0.12}px`, scale: '1.25', opacity: 1, offset: 0.1 },
+        { translate: `calc(-50% + ${drift / 2}px) ${-rise * 0.65}px`, scale: '1', opacity: 1, offset: 0.65 },
+        { translate: `calc(-50% + ${drift}px) ${-rise}px`, scale: '0.9', opacity: 0 },
       ],
-      { duration: 1800, easing: 'ease-out', fill: 'forwards' },
+      { duration: REACTION_MS, easing: 'ease-out', fill: 'forwards' },
     ).finished.finally(() => el.remove());
   }
 

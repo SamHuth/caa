@@ -18,6 +18,7 @@ export const savedSettings = {
     // Settings saved by older versions may fall outside today's limits.
     const [min, max] = LIMITS.turnTimer;
     s.turnTimer = Math.min(max, Math.max(min, s.turnTimer));
+    if (s.handSize !== 'max') s.handSize = Math.min(LIMITS.handSize[1], Math.max(LIMITS.handSize[0], s.handSize));
     return s;
   },
   set: (s: Settings) => store.set('settings', s),

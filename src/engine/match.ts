@@ -1,4 +1,4 @@
-import { DECK_SIZE, handPoints } from './cards';
+import { handPoints } from './cards';
 import { type GameAction, type GameEvent, type GameState, type Reduced, newGame, reduceGame } from './game';
 import type { Seeded } from './rng';
 
@@ -9,7 +9,8 @@ export interface Settings {
   cpuDifficulty: Difficulty;
   /** Seconds per turn. */
   turnTimer: number;
-  handSize: number;
+  /** Cards dealt to each player, or 'max' to deal out the whole deck. */
+  handSize: number | 'max';
   roundScoreLimit: number;
   bestOf: number;
 }
@@ -17,7 +18,7 @@ export interface Settings {
 export const LIMITS = {
   playerCount: [2, 8],
   turnTimer: [5, 30],
-  handSize: [5, 15],
+  handSize: [5, 10],
   roundScoreLimit: [50, 500],
   bestOf: [1, 7],
 } as const;
@@ -30,11 +31,6 @@ export const DEFAULT_SETTINGS: Settings = {
   roundScoreLimit: 100,
   bestOf: 3,
 };
-
-/** Keep at least 20 cards in the draw pile after dealing. */
-export function maxHandSize(players: number): number {
-  return Math.min(LIMITS.handSize[1], Math.floor((DECK_SIZE - 20) / players));
-}
 
 export function roundsToWin(bestOf: number): number {
   return Math.ceil(bestOf / 2);
@@ -78,7 +74,7 @@ export type MatchEvent =
 
 export function newMatch(settings: Settings, seed: number): { state: MatchState; events: MatchEvent[] } {
   const n = settings.playerCount;
-  const { state: game, events } = newGame(n, Math.min(settings.handSize, maxHandSize(n)), seed);
+  const { state: game, events } = newGame(n, settings.handSize, seed);
   return {
     state: {
       rng: seed ^ 0x5bd1e995,
@@ -108,7 +104,7 @@ export function reduceMatch(prev: MatchState, action: MatchAction): Reduced<Matc
     }
     s.rng = (s.rng * 1664525 + 1013904223) | 0;
     const n = s.settings.playerCount;
-    const { state: game, events } = newGame(n, Math.min(s.settings.handSize, maxHandSize(n)), s.rng);
+    const { state: game, events } = newGame(n, s.settings.handSize, s.rng);
     s.game = game;
     s.phase = 'playing';
     return { ok: true, state: s, events: [{ type: 'newGame', round: s.round, gameNumber: s.gameNumber }, ...events] };

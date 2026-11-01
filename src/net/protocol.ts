@@ -21,6 +21,10 @@ export type ReactionKey = keyof typeof REACTIONS;
 
 export const isReaction = (key: unknown): key is ReactionKey => typeof key === 'string' && Object.hasOwn(REACTIONS, key);
 
+/** Each game opens with a countdown, then the first card flips off the draw pile onto the centre pile. */
+export const COUNTDOWN_MS = 3000;
+export const CARD_FLIP_MS = 700;
+
 /** Actions a player's client can request (the seat is implied by the connection). */
 export type ClientAction =
   | { type: 'play'; cardIds: number[] }
@@ -50,6 +54,8 @@ export interface ClientView extends PlayerView {
   nextGameMs: number | null;
   /** How long the current game has been running (stops when it ends). */
   gameElapsedMs: number;
+  /** Time left before play opens: the countdown plus the first card's flip. Null once play is open. */
+  countdownMs: number | null;
 }
 
 export interface LobbyPlayer {
