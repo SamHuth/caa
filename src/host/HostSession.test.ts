@@ -60,12 +60,19 @@ describe('start of game countdown', () => {
     expect(states().flatMap((s) => s.events).some((e) => e.type === 'play' || e.type === 'draw')).toBe(true);
   });
 
-  it('crowns the last match winner, and keeps the crown through a rematch', () => {
+  it('crowns the last game winner for the next game, and moves the crown to each new winner', () => {
     const { session, last } = started([seat('Me', false), seat('Bot', true)]);
+    const afterChange = (e: MatchEvent[]) => (session as unknown as { afterChange(e: MatchEvent[]): void }).afterChange(e);
+    const won = (winner: number, matchWinner: number | null) => ({
+      type: 'gameOver' as const,
+      result: { winner, points: 50, lastStanding: false, roundWinner: null, matchWinner, leftover: [0, 0] },
+    });
     expect(last().view.champion).toBeNull();
-    const result = { winner: 1, points: 50, lastStanding: false, roundWinner: 1, matchWinner: 1, leftover: [50, 0] };
-    (session as unknown as { afterChange(e: MatchEvent[]): void }).afterChange([{ type: 'gameOver', result }]);
+    afterChange([won(1, null)]); // round carries on
     expect(last().view.champion).toBe(1);
+    afterChange([won(0, null)]);
+    expect(last().view.champion).toBe(0);
+    afterChange([won(1, 1)]); // match over, then a rematch
     session.start();
     expect(last().view.champion).toBe(1);
   });

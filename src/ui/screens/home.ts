@@ -15,9 +15,16 @@ export function homeScreen() {
   // A fresh random selection of avatars each visit (and each 🎲 roll), always including yours.
   const emojiGrid = h('div', { class: 'emoji-grid', role: 'group', 'aria-label': 'Avatar' });
   let emojiButtons: HTMLButtonElement[] = [];
+  // Picking an avatar rolls a fresh name to match it.
+  const pickEmoji = (emoji: string) => {
+    me.avatar.emoji = emoji;
+    name.value = me.name = nameFor(emoji);
+    save();
+    refresh();
+  };
   const shuffleChoices = () => {
     emojiButtons = avatarChoices(me.avatar.emoji).map((emoji) =>
-      h('button', { class: 'emoji-btn', 'aria-label': `Avatar ${emoji}`, onclick: () => ((me.avatar.emoji = emoji), save(), refresh()) }, emoji),
+      h('button', { class: 'emoji-btn', 'aria-label': `Avatar ${emoji}`, onclick: () => pickEmoji(emoji) }, emoji),
     );
     emojiGrid.replaceChildren(...emojiButtons);
   };

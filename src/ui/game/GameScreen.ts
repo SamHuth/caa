@@ -9,6 +9,14 @@ import { h, modal, toast } from '../dom';
 import { HandInput } from './HandInput';
 
 const RING_C = 2 * Math.PI * 30;
+
+/** Three curved arrows chasing each other clockwise; mirrored in CSS when play runs anticlockwise. */
+const DIRECTION_SVG = (() => {
+  const r = 80;
+  const at = (deg: number) => `${(r * Math.cos((deg * Math.PI) / 180)).toFixed(1)} ${(r * Math.sin((deg * Math.PI) / 180)).toFixed(1)}`;
+  const arcs = [0, 120, 240].map((a) => `<path d="M ${at(a)} A ${r} ${r} 0 0 1 ${at(a + 85)}" marker-end="url(#dir-head)"/>`);
+  return `<svg viewBox="-100 -100 200 200"><defs><marker id="dir-head" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker></defs>${arcs.join('')}</svg>`;
+})();
 const FLY_MS = 380;
 const PILE_VISIBLE = 4;
 const REACTION_MS = 3200;
@@ -55,6 +63,7 @@ export class GameScreen {
   private handRow = h('div', { class: 'hand-row' });
   private drawBtn = h('button', { class: 'btn btn-small btn-ghost' }, 'Draw');
   private playBtn = h('button', { class: 'btn btn-small btn-primary' }, 'Play');
+  private handHint = h('p', { class: 'hand-hint' });
   private reactBar = h('div', { class: 'react-bar', role: 'group', 'aria-label': 'Reactions' });
   private reactButtons = new Map<ReactionKey, HTMLElement>();
   private lastSentReact = 0;
@@ -63,7 +72,7 @@ export class GameScreen {
   private swapModal: Modal | null = null;
   /** Seat for each swap option (null = keep my hand), indexed by the 1–9 keys. */
   private swapOptions: number[] = [];
-  private direction = h('div', { class: 'direction', 'aria-hidden': 'true' }, '↻');
+  private direction = h('div', { class: 'direction', 'aria-hidden': 'true' });
   private resultModal: Modal | null = null;
   private resultKey = '';
   private countdown: ReturnType<typeof setInterval> | undefined;
@@ -82,6 +91,7 @@ export class GameScreen {
 
   constructor(private transport: Transport) {
     this.handEl.append(this.handRow);
+    this.direction.innerHTML = DIRECTION_SVG;
     this.drawPile.onclick = () => this.draw();
     this.drawBtn.onclick = () => this.draw();
     this.playBtn.onclick = () => this.send();
@@ -117,7 +127,7 @@ export class GameScreen {
         this.reactBar,
         h('div', { class: 'me-row' }, this.me, h('div', { class: 'actions' }, this.drawBtn, this.playBtn)),
         this.handEl,
-        h('p', { class: 'hand-hint' }, 'Tap cards in order · swipe up to play'),
+        this.handHint,
       ),
     );
     this.input = new HandInput(this.handEl, {
@@ -243,17 +253,20 @@ export class GameScreen {
 
   private pointAtActor() {
     const v = this.view;
-    const live = !!v && this.inPlay;
+    // Also shown during the opening countdown, pointing at whoever goes first.
+    const live = !!v && v.matchPhase === 'playing';
     this.pointer.classList.toggle('on', live);
     if (!v || !live) return;
+    const mine = this.actor(v) === v.you;
     const target = this.seatAvatar(this.actor(v))?.getBoundingClientRect();
     const origin = this.pointer.getBoundingClientRect();
     if (!target || !this.table.clientWidth) return;
-    const angle = (Math.atan2(target.top + target.height / 2 - origin.top, target.left + target.width / 2 - origin.left) * 180) / Math.PI;
+    // Your turn: straight down at your side of the screen. Otherwise aim at the player's avatar.
+    const angle = mine ? 90 : (Math.atan2(target.top + target.height / 2 - origin.top, target.left + target.width / 2 - origin.left) * 180) / Math.PI;
     // Swing the short way round rather than spinning back through 360°.
     this.pointerAngle += ((((angle - this.pointerAngle) % 360) + 540) % 360) - 180;
     this.pointer.style.rotate = `${this.pointerAngle}deg`;
-    this.pointer.classList.toggle('mine', this.actor(v) === v.you);
+    this.pointer.classList.toggle('mine', mine);
   }
 
   private announceTurn() {
@@ -264,6 +277,12 @@ export class GameScreen {
     this.announced = key;
     this.flashBanner('Your turn!', 'mine');
     navigator.vibrate?.(40);
+  }
+
+  /** You were knocked out of the current game and are watching the rest. */
+  private get watching() {
+    const v = this.view;
+    return !!v && v.matchPhase === 'playing' && v.out[v.you];
   }
 
   /** A game is under way and past its opening countdown. */
@@ -345,7 +364,7 @@ export class GameScreen {
     const av = h('div', { class: 'avatar' }, info.connected ? info.avatar.emoji : '📴');
     av.style.background = info.avatar.colour;
     if (info.cpu) av.append(h('span', { class: 'cpu-tag', title: 'CPU' }, '🤖'));
-    if (v.champion === seat) av.append(h('span', { class: 'crown', title: 'Won the last match' }, '👑'));
+    if (v.champion === seat) av.append(h('span', { class: 'crown', title: 'Won the last game' }, '👑'));
     if (timed && v.turnMsLeft !== null) {
       const total = v.settings.turnTimer * 1000;
       const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -399,7 +418,6 @@ export class GameScreen {
     else if (actor === v.you) text = 'Your turn';
     else text = `${name}'s turn`;
     this.status.textContent = text;
-    this.direction.textContent = v.direction === 1 ? '↻' : '↺';
     this.direction.classList.toggle('ccw', v.direction === -1);
     this.status.className = `status ${actor === v.you ? 'mine' : ''}`;
   }
@@ -443,7 +461,7 @@ export class GameScreen {
         fill: 'forwards',
       });
     }
-    this.drawBtn.disabled = !this.canDraw;
+    this.drawBtn.disabled = !this.canDraw || this.watching;
     this.drawBtn.textContent = v.drawCount === 0 && this.canDraw ? 'Pass (out)' : this.myTurn && v.stack ? `Take +${v.stack.count}` : 'Draw';
     this.el.classList.toggle('my-turn', isActor);
   }
@@ -452,7 +470,13 @@ export class GameScreen {
     const v = this.view;
     if (!v) return;
     this.playBtn.textContent = this.selected.length > 1 ? `Play ${this.selected.length}` : 'Play';
-    this.playBtn.disabled = this.selected.length === 0 || v.matchPhase !== 'playing';
+    // Knocked out: your hand stays visible (and scrollable) but greyed out and inert.
+    const watching = this.watching;
+    if (watching) this.selected = [];
+    this.handEl.classList.toggle('disabled', watching);
+    this.handHint.classList.toggle('watching', watching);
+    this.handHint.textContent = watching ? 'You’re out: watching until the game ends' : 'Tap cards in order · swipe up to play';
+    this.playBtn.disabled = this.selected.length === 0 || v.matchPhase !== 'playing' || watching;
     this.handRow.replaceChildren(
       ...v.hand.map((c, i) => {
         const order = this.selected.indexOf(c.id);
@@ -481,7 +505,7 @@ export class GameScreen {
   // ---------------------------------------------------------------- input
 
   private toggle(id: number) {
-    if (!this.view || this.pending) return;
+    if (!this.view || this.pending || this.watching) return;
     const i = this.selected.indexOf(id);
     if (i >= 0) this.selected.splice(i, 1);
     else this.selected.push(id);

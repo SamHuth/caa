@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AVATAR_CHOICES, AVATAR_EMOJIS, NAME_MAX, avatarChoices, cpuSeats, randomProfile } from './profile';
+import { AVATAR_CHOICES, AVATAR_EMOJIS, NAME_MAX, avatarChoices, cpuSeats, randomProfile, sanitiseProfile, upgradeName } from './profile';
 
 describe('CPU seats', () => {
   it('name each CPU after its avatar emoji', () => {
@@ -52,5 +52,25 @@ describe('randomProfile', () => {
       if (p.avatar.emoji === '🦊') expect(p.name).toMatch(/ Fox$/);
       expect(p.name.length).toBeLessThanOrEqual(NAME_MAX);
     }
+  });
+});
+
+describe('upgrading saved names', () => {
+  it('replaces names the old generator made for a different avatar', () => {
+    expect(upgradeName('Dizzy Octopus', '🐼')).toMatch(/^[A-Z][a-z]+ Panda$/);
+    expect(upgradeName('Fluffy Yak', '🦊')).toMatch(/ Fox$/);
+    expect(upgradeName('Sneaky Fox', '💩')).toMatch(/ Poop$/);
+  });
+
+  it('keeps names that already match, and names people typed', () => {
+    expect(upgradeName('Dizzy Panda', '🐼')).toBe('Dizzy Panda');
+    expect(upgradeName('Sam', '🐼')).toBe('Sam');
+    expect(upgradeName('Angali', '🦊')).toBe('Angali');
+    expect(upgradeName('Big Sam', '🦊')).toBe('Big Sam');
+    expect(upgradeName('the octopus', '🦊')).toBe('the octopus');
+  });
+
+  it('a missing name falls back to one that matches the avatar', () => {
+    expect(sanitiseProfile('', { emoji: '🦑', colour: '#e5484d' }).name).toMatch(/ Squid$/);
   });
 });
