@@ -60,6 +60,16 @@ describe('start of game countdown', () => {
     expect(states().flatMap((s) => s.events).some((e) => e.type === 'play' || e.type === 'draw')).toBe(true);
   });
 
+  it('crowns the last match winner, and keeps the crown through a rematch', () => {
+    const { session, last } = started([seat('Me', false), seat('Bot', true)]);
+    expect(last().view.champion).toBeNull();
+    const result = { winner: 1, points: 50, lastStanding: false, roundWinner: 1, matchWinner: 1, leftover: [50, 0] };
+    (session as unknown as { afterChange(e: MatchEvent[]): void }).afterChange([{ type: 'gameOver', result }]);
+    expect(last().view.champion).toBe(1);
+    session.start();
+    expect(last().view.champion).toBe(1);
+  });
+
   it('counts down again for a rematch', () => {
     const { session, last } = started([seat('Me', false), seat('Bot', true)]);
     vi.advanceTimersByTime(LOCK_MS);

@@ -9,6 +9,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '3 Nov 2026',
+    changes: [
+      'CPU names now match their avatar, like 🦊 Unhinged Fox, with way wilder names and no repeats at the table',
+      'The 🎲 now gives you a name that matches your avatar too',
+      'Way more avatars, some of them deeply strange. You get a random 24 to choose from each visit',
+      'Names are now properly unsettling, like Moist Squid or Possessed Clown',
+      'Fixed: the bell on the home screen couldn’t be clicked on desktop',
+      'A new row of avatar emojis: 🐷 🐮 🦔 🦝 🐻 🦒 🐊 🍩',
+      'Whoever won the last match wears a 👑 in the rematch',
+    ],
+  },
+  {
     date: '1 Nov 2026',
     changes: [
       'New: this What’s New list on the home screen',

@@ -1,7 +1,7 @@
 import { go } from '../app';
 import { totalChanges } from '../changelog';
 import { h, store } from '../dom';
-import { AVATAR_COLOURS, AVATAR_EMOJIS, NAME_MAX, avatarEl, profile, randomAvatar, randomName } from '../profile';
+import { AVATAR_COLOURS, NAME_MAX, avatarChoices, avatarEl, nameFor, profile, randomProfile } from '../profile';
 import { showHowToPlay } from './howToPlay';
 import { showWhatsNew } from './whatsNew';
 
@@ -12,9 +12,15 @@ export function homeScreen() {
   const save = () => profile.set(me);
 
   const preview = h('div', { class: 'profile-preview' });
-  const emojiButtons = AVATAR_EMOJIS.map((emoji) =>
-    h('button', { class: 'emoji-btn', 'aria-label': `Avatar ${emoji}`, onclick: () => ((me.avatar.emoji = emoji), save(), refresh()) }, emoji),
-  );
+  // A fresh random selection of avatars each visit (and each 🎲 roll), always including yours.
+  const emojiGrid = h('div', { class: 'emoji-grid', role: 'group', 'aria-label': 'Avatar' });
+  let emojiButtons: HTMLButtonElement[] = [];
+  const shuffleChoices = () => {
+    emojiButtons = avatarChoices(me.avatar.emoji).map((emoji) =>
+      h('button', { class: 'emoji-btn', 'aria-label': `Avatar ${emoji}`, onclick: () => ((me.avatar.emoji = emoji), save(), refresh()) }, emoji),
+    );
+    emojiGrid.replaceChildren(...emojiButtons);
+  };
   const colourButtons = AVATAR_COLOURS.map((colour) => {
     const b = h('button', { class: 'swatch', 'aria-label': `Colour ${colour}`, onclick: () => ((me.avatar.colour = colour), save(), refresh()) });
     b.style.background = colour;
@@ -40,7 +46,7 @@ export function homeScreen() {
     oninput: () => ((me.name = name.value.trim()), save()),
     onblur: () => {
       // Never leave the name blank.
-      if (!name.value.trim()) name.value = me.name = randomName();
+      if (!name.value.trim()) name.value = me.name = nameFor(me.avatar.emoji);
       save();
     },
   });
@@ -49,9 +55,11 @@ export function homeScreen() {
     'aria-label': 'Random name and avatar',
     title: 'Random name and avatar',
     onclick: () => {
-      name.value = me.name = randomName();
-      me.avatar = randomAvatar();
+      const rolled = randomProfile();
+      name.value = me.name = rolled.name;
+      me.avatar = rolled.avatar;
       save();
+      shuffleChoices();
       refresh();
       dice.animate([{ rotate: '0deg' }, { rotate: '360deg' }], { duration: 400, easing: 'ease-out' });
     },
@@ -76,6 +84,7 @@ export function homeScreen() {
     badge,
   );
 
+  shuffleChoices();
   refresh();
   return h(
     'main',
@@ -91,7 +100,7 @@ export function homeScreen() {
       'section',
       { class: 'panel profile' },
       h('div', { class: 'profile-top' }, preview, h('div', { class: 'name-row' }, name, dice)),
-      h('div', { class: 'emoji-grid', role: 'group', 'aria-label': 'Avatar' }, ...emojiButtons),
+      emojiGrid,
       h('div', { class: 'swatches', role: 'group', 'aria-label': 'Avatar colour' }, ...colourButtons),
     ),
     h(

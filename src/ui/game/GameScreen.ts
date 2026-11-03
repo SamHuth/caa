@@ -4,6 +4,7 @@ import { type PlayContext, checkPlay } from '../../engine/rules';
 import { CARD_FLIP_MS, type ClientView, type HostMsg, REACTIONS, type ReactionKey, type Transport } from '../../net/protocol';
 import { go } from '../app';
 import { cardBack, cardEl } from '../cardEl';
+import { chickenConfetti } from '../chickenConfetti';
 import { h, modal, toast } from '../dom';
 import { HandInput } from './HandInput';
 
@@ -344,6 +345,7 @@ export class GameScreen {
     const av = h('div', { class: 'avatar' }, info.connected ? info.avatar.emoji : '📴');
     av.style.background = info.avatar.colour;
     if (info.cpu) av.append(h('span', { class: 'cpu-tag', title: 'CPU' }, '🤖'));
+    if (v.champion === seat) av.append(h('span', { class: 'crown', title: 'Won the last match' }, '👑'));
     if (timed && v.turnMsLeft !== null) {
       const total = v.settings.turnTimer * 1000;
       const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -885,11 +887,24 @@ export class GameScreen {
   }
 
   private confirmLeave() {
-    const stay = h('button', { class: 'btn btn-ghost' }, 'Stay');
-    const leave = h('button', { class: 'btn btn-danger', onclick: () => (m.close(), this.exit()) }, 'Leave');
-    const warning = this.transport.rematch && this.view && this.view.seats.some((s, i) => i !== this.view!.you && !s.cpu) ? 'You are the host, so this ends the game for everyone.' : 'Your progress in this match will be lost.';
-    const m = modal([h('h2', {}, 'Leave game?'), h('p', {}, warning), h('div', { class: 'stack' }, leave, stay)], { dismissable: true });
-    stay.onclick = () => m.close();
+    const stay = h('button', { class: 'btn btn-primary' }, 'Fine, I’ll stay like a chicken 🐔');
+    const leave = h('button', { class: 'btn btn-danger', onclick: () => (m.close(), chickenConfetti(), this.exit()) }, 'Leave like a chicken 🐔');
+    const isHost = this.transport.rematch && this.view && this.view.seats.some((s, i) => i !== this.view!.you && !s.cpu);
+    const warning = isHost ? 'You’re the host, so you’ll yeet everyone else.' : 'Your progress in this match will be lost.';
+    const m = modal(
+      [
+        h('div', { class: 'chicken' }, '🐔'),
+        h('h2', { class: 'center' }, 'Running away, you chicken?'),
+        h('p', { class: 'center' }, 'Bawk bawk! Couldn’t handle a few cards? Angali will be clucking around telling everyone about this...'),
+        h('p', { class: 'center hint' }, warning),
+        h('div', { class: 'stack' }, stay, leave),
+      ],
+      { dismissable: true },
+    );
+    stay.onclick = () => {
+      m.close();
+      chickenConfetti();
+    };
   }
 
   private showClosed(reason: string) {

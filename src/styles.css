@@ -231,6 +231,8 @@ h3 {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
   right: 16px;
+  /* stay clickable above the logo when the page sits near the top (desktop) */
+  z-index: 5;
   font-size: 1.15rem;
 }
 
@@ -269,6 +271,8 @@ h3 {
 
 .home {
   position: relative;
+  /* keep the logo clear of the bell in the top corner */
+  padding-top: calc(max(12px, env(safe-area-inset-top)) + 52px);
   /* safe: don't clip the top when the profile panel makes it taller than the screen */
   justify-content: safe center;
 }
@@ -551,21 +555,40 @@ h3 {
   transform: scale(1.12);
 }
 
-.logo.small .logo-cards {
-  height: 62px;
+/* Landscape logo on the home screen: a small card fan beside a one-line title. */
+.logo.small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   margin-bottom: 4px;
+  text-align: left;
+}
+
+.logo.small .logo-cards {
+  flex: none;
+  width: 60px;
+  height: 44px;
+  margin: 0;
 }
 
 .logo.small .lc {
-  width: 36px;
-  height: 52px;
-  margin-left: -18px;
+  top: 4px;
+  width: 24px;
+  height: 35px;
+  margin-left: -12px;
   border-width: 2px;
-  border-radius: 7px;
+  border-radius: 5px;
 }
 
+.logo.small .lc:nth-child(1) { transform: rotate(-22deg) translateX(-16px); }
+.logo.small .lc:nth-child(2) { transform: rotate(-7deg) translateX(-5px); }
+.logo.small .lc:nth-child(3) { transform: rotate(7deg) translateX(5px); }
+.logo.small .lc:nth-child(4) { transform: rotate(22deg) translateX(16px); }
+
 .logo.small h1 {
-  font-size: clamp(1.7rem, 7.5vw, 2.4rem);
+  font-size: clamp(1.1rem, 5.8vw, 2rem);
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------- cards */
@@ -1413,6 +1436,45 @@ h3 {
   background: #0c0a24;
   border: 1px solid rgba(255, 255, 255, 0.5);
   font-size: 0.7rem;
+}
+
+.crown {
+  position: absolute;
+  top: -0.85em;
+  left: 50%;
+  translate: -50% 0;
+  rotate: -12deg;
+  font-size: 1.15rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  pointer-events: none;
+  z-index: 3;
+}
+
+.confetti-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confetti-chicken {
+  position: absolute;
+  line-height: 1;
+  will-change: translate, rotate;
+}
+
+.chicken {
+  font-size: 3.5rem;
+  line-height: 1;
+  text-align: center;
+  animation: chicken 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes chicken {
+  from { rotate: -10deg; }
+  to { rotate: 10deg; }
 }
 
 .reaction {

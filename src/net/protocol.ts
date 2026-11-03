@@ -56,6 +56,8 @@ export interface ClientView extends PlayerView {
   gameElapsedMs: number;
   /** Time left before play opens: the countdown plus the first card's flip. Null once play is open. */
   countdownMs: number | null;
+  /** Seat that won the previous match in this room, shown with a crown. */
+  champion: number | null;
 }
 
 export interface LobbyPlayer {

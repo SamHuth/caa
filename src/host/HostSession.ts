@@ -37,6 +37,8 @@ export class HostSession {
   private gameEndedAt: number | null = null;
   /** While set, the game is counting down: no turns, timers, CPU moves or jump-ins until then. */
   private startsAt: number | null = null;
+  /** Winner of the last finished match; kept through rematches so they wear the crown. */
+  private champion: number | null = null;
   private nextGameAt: number | null = null;
   /** CPU reaction timers: independent of game timers so state changes don't cancel them. */
   private reactTimers = new Set<Timer>();
@@ -122,6 +124,7 @@ export class HostSession {
     this.clearTimers();
     this.cpuReactions(events);
     if (events.some((e) => e.type === 'gameOver')) this.gameEndedAt = Date.now();
+    for (const e of events) if (e.type === 'gameOver' && e.result.matchWinner !== null) this.champion = e.result.matchWinner;
     if (events.some((e) => e.type === 'newGame')) {
       this.startsAt = Date.now() + COUNTDOWN_MS + CARD_FLIP_MS;
       this.gameStartedAt = this.startsAt; // the game clock starts when play opens
@@ -192,6 +195,7 @@ export class HostSession {
       nextGameMs: this.nextGameAt === null ? null : Math.max(0, this.nextGameAt - now),
       gameElapsedMs: Math.max(0, (this.gameEndedAt ?? now) - this.gameStartedAt),
       countdownMs: this.startsAt === null ? null : Math.max(0, this.startsAt - now),
+      champion: this.champion,
     };
     return { t: 'state', view, events: redactEvents(events, seat) };
   }
